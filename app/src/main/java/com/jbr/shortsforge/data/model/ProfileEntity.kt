@@ -30,6 +30,8 @@ data class ProfileEntity(
 
     // ── TikTok ────────────────────────────────────────────────────────────
     val tiktokAccessToken: String = "",
+    val tiktokRefreshToken: String = "",
+    val tiktokTokenExpiry: Long = 0,
     val tiktokOpenId: String = "",
     val tiktokClientKey: String = "",
     val tiktokClientSecret: String = "",

@@ -70,10 +70,20 @@ class ProfileRepository @Inject constructor(
         profileDao.updateProfile(profile.copy(igUserId = igUserId))
     }
 
-    suspend fun updateTikTok(profileId: Long, accessToken: String, openId: String, key: String, secret: String) {
+    suspend fun updateTikTok(
+        profileId: Long,
+        accessToken: String,
+        refreshToken: String,
+        expiry: Long,
+        openId: String,
+        key: String,
+        secret: String
+    ) {
         val profile = profileDao.getProfileById(profileId) ?: return
         profileDao.updateProfile(profile.copy(
             tiktokAccessToken = accessToken,
+            tiktokRefreshToken = refreshToken,
+            tiktokTokenExpiry = expiry,
             tiktokOpenId = openId,
             tiktokClientKey = key,
             tiktokClientSecret = secret
@@ -103,7 +113,8 @@ class ProfileRepository @Inject constructor(
     suspend fun disconnectTikTok(profileId: Long) {
         val profile = profileDao.getProfileById(profileId) ?: return
         profileDao.updateProfile(profile.copy(
-            tiktokAccessToken = "", tiktokOpenId = "",
+            tiktokAccessToken = "", tiktokRefreshToken = "",
+            tiktokTokenExpiry = 0, tiktokOpenId = "",
             tiktokClientKey = "", tiktokClientSecret = ""
         ))
     }

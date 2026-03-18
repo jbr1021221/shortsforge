@@ -165,15 +165,38 @@ class ProfileWorker @AssistedInject constructor(
                 onError = { err -> Log.e(TAG, "YT error [${profile.name}]: $err") }
             )
 
-            // 9. Social platforms
+            // 9. Social platforms (with TikTok Token Refresh)
+            var tiktokToken = profile.tiktokAccessToken
+            var tiktokRefresh = profile.tiktokRefreshToken
+            var tiktokExpiry = profile.tiktokTokenExpiry
+
+            if (profile.isTikTokConnected && (tiktokExpiry < System.currentTimeMillis() + 600_000)) {
+                Log.d(TAG, "Refreshing TikTok token for ${profile.name} (expiry: $tiktokExpiry)...")
+                val newToken = TikTokUploadManager.refreshAccessToken(
+                    tiktokRefresh, profile.tiktokClientKey, profile.tiktokClientSecret
+                )
+                if (newToken != null) {
+                    tiktokToken = newToken.accessToken
+                    tiktokRefresh = newToken.refreshToken
+                    tiktokExpiry = System.currentTimeMillis() + (newToken.expiresIn * 1000)
+                    profileRepository.updateTikTok(
+                        profileId, tiktokToken, tiktokRefresh, tiktokExpiry,
+                        newToken.openId, profile.tiktokClientKey, profile.tiktokClientSecret
+                    )
+                    Log.d(TAG, "TikTok token refreshed successfully")
+                } else {
+                    Log.e(TAG, "TikTok token refresh FAILED")
+                }
+            }
+
             val creds = PlatformCredentials(
-                fbAccessToken = profile.fbAccessToken,
-                fbPageId = profile.fbPageId,
-                fbPageAccessToken = profile.fbPageAccessToken,
-                igUserId = profile.igUserId,
-                tiktokAccessToken = profile.tiktokAccessToken,
-                tiktokOpenId = profile.tiktokOpenId,
-                tiktokClientKey = profile.tiktokClientKey,
+                fbAccessToken      = profile.fbAccessToken,
+                fbPageId           = profile.fbPageId,
+                fbPageAccessToken  = profile.fbPageAccessToken,
+                igUserId           = profile.igUserId,
+                tiktokAccessToken  = tiktokToken,
+                tiktokOpenId       = profile.tiktokOpenId,
+                tiktokClientKey    = profile.tiktokClientKey,
                 tiktokClientSecret = profile.tiktokClientSecret
             )
 

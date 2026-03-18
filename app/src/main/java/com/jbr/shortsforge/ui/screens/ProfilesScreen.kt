@@ -2,6 +2,7 @@ package com.jbr.shortsforge.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -409,8 +410,23 @@ private fun EditProfileSheet(
     val scope   = rememberCoroutineScope()
     var showSection by remember { mutableStateOf("main") }
 
-    // State for YouTube
-    val account = remember { GoogleAuthManager.getAccount(context) }
+    // State for YouTube sign-in
+    var linkedYtEmail   by remember { mutableStateOf(profile.ytAccountEmail) }
+    var linkedYtName    by remember { mutableStateOf(profile.ytAccountName) }
+    var ytLinking       by remember { mutableStateOf(false) }
+
+    val googleSignInLauncher = rememberLauncherForActivityResult(StartActivityForResult()) { result ->
+        val account = GoogleAuthManager.handleSignInResult(result.data)
+        if (account != null) {
+            linkedYtEmail = account.email ?: ""
+            linkedYtName  = account.displayName ?: ""
+            viewModel.updateYouTube(profile.id, account.email ?: "", account.displayName ?: "")
+            onSaved("YouTube account linked: ${account.email}")
+        } else {
+            onSaved("YouTube sign-in cancelled or failed")
+        }
+        ytLinking = false
+    }
 
     // State for schedule
     var scheduleEnabled by remember { mutableStateOf(profile.autoUploadEnabled) }
@@ -473,36 +489,49 @@ private fun EditProfileSheet(
 
             // ── YouTube ───────────────────────────────────────────────────
             SectionCard("▶ YouTube") {
-                if (account != null) {
+                if (linkedYtEmail.isNotBlank()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(account.email ?: "Unknown",
+                            Text(linkedYtEmail,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold)
-                            Text("Signed in account",
+                            Text("Linked to this profile",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = GreenOk)
                         }
-                        Button(
+                        OutlinedButton(
                             onClick = {
-                                viewModel.updateYouTube(
-                                    profile.id,
-                                    account.email ?: "",
-                                    account.displayName ?: ""
-                                )
-                                onSaved("YouTube account linked!")
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                        ) { Text(if (profile.isYouTubeConnected) "Re-link" else "Link") }
+                                ytLinking = true
+                                GoogleAuthManager.signOut(context)
+                                googleSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context))
+                            }
+                        ) { Text("Change") }
                     }
                 } else {
-                    Text("Sign in to Google first from the main Settings screen.",
+                    Text("No YouTube account linked to this profile.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            ytLinking = true
+                            GoogleAuthManager.signOut(context)
+                            googleSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    ) {
+                        if (ytLinking) {
+                            CircularProgressIndicator(Modifier.size(18.dp),
+                                color = Color.White, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text("Sign in with Google")
+                    }
                 }
             }
 

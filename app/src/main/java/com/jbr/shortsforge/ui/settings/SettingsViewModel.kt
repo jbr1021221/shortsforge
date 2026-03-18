@@ -4,22 +4,27 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jbr.shortsforge.data.model.AppSettings
 import com.jbr.shortsforge.data.model.PlatformCredentials
+import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.preferences.AppSettingsRepository
-import com.jbr.shortsforge.data.preferences.PlatformCredentialsRepository
+import com.jbr.shortsforge.data.repository.ProfileRepository
+import android.content.Context
+import com.jbr.shortsforge.engine.AutoUploadScheduler
+import com.jbr.shortsforge.engine.ProfileScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: AppSettingsRepository,
-    private val platformCredentialsRepository: PlatformCredentialsRepository
+    private val profileRepository: ProfileRepository,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // ── App settings ───────────────────────────────────────────────────────
+    val activeProfile: StateFlow<ProfileEntity?> = profileRepository.activeProfile
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val settings: StateFlow<AppSettings> = repository.settingsFlow
         .stateIn(
@@ -28,17 +33,22 @@ class SettingsViewModel @Inject constructor(
             initialValue = AppSettings()
         )
 
-    // ── Platform credentials ───────────────────────────────────────────────
-
     val platformCredentials: StateFlow<PlatformCredentials> =
-        platformCredentialsRepository.credentialsFlow
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000),
-                initialValue = PlatformCredentials()
+        profileRepository.activeProfile.map { profile ->
+            if (profile == null) PlatformCredentials()
+            else PlatformCredentials(
+                fbAccessToken      = profile.fbAccessToken,
+                fbPageId           = profile.fbPageId,
+                fbPageAccessToken  = profile.fbPageAccessToken,
+                igUserId           = profile.igUserId,
+                tiktokAccessToken  = profile.tiktokAccessToken,
+                tiktokOpenId       = profile.tiktokOpenId,
+                tiktokClientKey    = profile.tiktokClientKey,
+                tiktokClientSecret = profile.tiktokClientSecret
             )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PlatformCredentials())
 
-    // ── App settings update functions ──────────────────────────────────────
+    // ── Global settings ────────────────────────────────────────────────────
 
     fun updateImagesPerShort(value: Int) {
         viewModelScope.launch { repository.updateImagesPerShort(value) }
@@ -80,52 +90,107 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { repository.updateReminderTime(hour, minute) }
     }
 
+    // ── Per-profile: schedule ──────────────────────────────────────────────
+
     fun updateAutoUploadEnabled(enabled: Boolean) {
-        viewModelScope.launch { repository.updateAutoUploadEnabled(enabled) }
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateSchedule(
+                profile.id, enabled,
+                profile.autoUploadHour, profile.autoUploadMinute,
+                profile.hourlyUploadEnabled
+            )
+            // Legacy sync: Disable the old global auto-upload to avoid conflicts
+            repository.updateAutoUploadEnabled(false)
+            AutoUploadScheduler.cancelAutoUpload(context)
+
+            if (enabled) {
+                if (profile.hourlyUploadEnabled) {
+                    ProfileScheduler.scheduleHourly(context, profile.id)
+                } else {
+                    ProfileScheduler.scheduleDaily(context, profile.id, profile.autoUploadHour, profile.autoUploadMinute)
+                }
+            } else {
+                ProfileScheduler.cancel(context, profile.id)
+            }
+        }
     }
 
     fun updateAutoUploadTime(hour: Int, minute: Int) {
-        viewModelScope.launch { repository.updateAutoUploadTime(hour, minute) }
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateSchedule(
+                profile.id, profile.autoUploadEnabled,
+                hour, minute,
+                profile.hourlyUploadEnabled
+            )
+            if (profile.autoUploadEnabled) {
+                if (profile.hourlyUploadEnabled) {
+                    ProfileScheduler.scheduleHourly(context, profile.id)
+                } else {
+                    ProfileScheduler.scheduleDaily(context, profile.id, hour, minute)
+                }
+            }
+        }
     }
 
     fun updateAutoUploadTitle(title: String) {
-        viewModelScope.launch { repository.updateAutoUploadTitle(title) }
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateProfile(profile.copy(autoUploadTitle = title))
+        }
     }
 
-    // ── Platform credential functions ──────────────────────────────────────
+    // ── Per-profile: YouTube ───────────────────────────────────────────────
+
+    fun linkYouTubeToActiveProfile(email: String, name: String) {
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateYouTube(profile.id, email, name)
+        }
+    }
+
+    // ── Per-profile: platforms ─────────────────────────────────────────────
 
     fun saveFacebook(userToken: String, pageId: String, pageAccessToken: String) {
         viewModelScope.launch {
-            platformCredentialsRepository.saveFacebook(userToken, pageId, pageAccessToken)
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateFacebook(profile.id, userToken, pageId, pageAccessToken)
         }
     }
 
     fun saveInstagram(igUserId: String) {
         viewModelScope.launch {
-            platformCredentialsRepository.saveInstagram(igUserId)
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateInstagram(profile.id, igUserId)
         }
     }
 
-    fun saveTikTok(
-        accessToken: String,
-        openId: String,
-        clientKey: String,
-        clientSecret: String
-    ) {
+    fun saveTikTok(accessToken: String, refreshToken: String, expiry: Long, openId: String, clientKey: String, clientSecret: String) {
         viewModelScope.launch {
-            platformCredentialsRepository.saveTikTok(accessToken, openId, clientKey, clientSecret)
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateTikTok(profile.id, accessToken, refreshToken, expiry, openId, clientKey, clientSecret)
         }
     }
 
     fun disconnectFacebook() {
-        viewModelScope.launch { platformCredentialsRepository.disconnectFacebook() }
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.disconnectFacebook(profile.id)
+        }
     }
 
     fun disconnectInstagram() {
-        viewModelScope.launch { platformCredentialsRepository.disconnectInstagram() }
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.disconnectInstagram(profile.id)
+        }
     }
 
     fun disconnectTikTok() {
-        viewModelScope.launch { platformCredentialsRepository.disconnectTikTok() }
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.disconnectTikTok(profile.id)
+        }
     }
 }

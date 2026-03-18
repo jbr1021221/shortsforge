@@ -14,8 +14,8 @@ object AutoUploadScheduler {
      * Schedule the next upload at a specific hour:minute.
      * After each upload the worker calls this again to schedule the next hour.
      */
-    fun scheduleDaily(context: Context, hour: Int, minute: Int, forceReschedule: Boolean = true) {
-        scheduleAt(context, hour, minute, forceReschedule)
+    fun scheduleDaily(context: Context, hour: Int, minute: Int, policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE) {
+        scheduleAt(context, hour, minute, policy)
     }
 
     /**
@@ -24,11 +24,11 @@ object AutoUploadScheduler {
      */
     fun scheduleHourly(context: Context, startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
         val nextHour = (startHour + 1) % 24
-        scheduleAt(context, nextHour, 0, forceReschedule = true)
+        scheduleAt(context, nextHour, 0, policy = ExistingWorkPolicy.REPLACE)
         Log.d(TAG, "Hourly mode: next upload scheduled at $nextHour:00")
     }
 
-    private fun scheduleAt(context: Context, hour: Int, minute: Int, forceReschedule: Boolean) {
+    private fun scheduleAt(context: Context, hour: Int, minute: Int, policy: ExistingWorkPolicy) {
         val workManager = WorkManager.getInstance(context)
 
         val now = Calendar.getInstance()
@@ -65,7 +65,7 @@ object AutoUploadScheduler {
 
         workManager.enqueueUniqueWork(
             TAG_AUTO_UPLOAD,
-            ExistingWorkPolicy.REPLACE,
+            policy,
             autoUploadRequest
         )
     }

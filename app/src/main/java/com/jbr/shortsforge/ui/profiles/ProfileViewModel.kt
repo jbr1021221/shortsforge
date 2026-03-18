@@ -114,10 +114,18 @@ class ProfileViewModel @Inject constructor(
         onResult: (success: Boolean, message: String) -> Unit
     ) {
         viewModelScope.launch {
-            val pair = TikTokUploadManager.exchangeCodeForToken(authCode, clientKey, clientSecret, redirectUri)
-            if (pair != null) {
-                val (accessToken, openId) = pair
-                profileRepository.updateTikTok(profileId, accessToken, openId, clientKey, clientSecret)
+            val tokenInfo = TikTokUploadManager.exchangeCodeForToken(authCode, clientKey, clientSecret, redirectUri)
+            if (tokenInfo != null) {
+                val expiry = System.currentTimeMillis() + (tokenInfo.expiresIn * 1000)
+                profileRepository.updateTikTok(
+                    profileId,
+                    tokenInfo.accessToken,
+                    tokenInfo.refreshToken,
+                    expiry,
+                    tokenInfo.openId,
+                    clientKey,
+                    clientSecret
+                )
                 onResult(true, "TikTok connected!")
             } else {
                 onResult(false, "TikTok connection failed — check your credentials")

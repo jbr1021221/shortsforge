@@ -39,7 +39,6 @@ import com.jbr.shortsforge.engine.*
 import com.jbr.shortsforge.ui.settings.SettingsViewModel
 import kotlinx.coroutines.launch
 
-// ── Platform brand colours ─────────────────────────────────────────────────
 private val FacebookBlue  = Color(0xFF1877F2)
 private val InstagramPink = Color(0xFFE1306C)
 private val TikTokBlack   = Color(0xFF010101)
@@ -50,26 +49,24 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit
 ) {
-    val settings     by viewModel.settings.collectAsStateWithLifecycle()
+    val settings      by viewModel.settings.collectAsStateWithLifecycle()
+    val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
     val platformCreds by viewModel.platformCredentials.collectAsStateWithLifecycle()
-    val context      = LocalContext.current
-    val scope        = rememberCoroutineScope()
+    val context       = LocalContext.current
+    val scope         = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showTimePicker           by remember { mutableStateOf(false) }
     var showAutoUploadTimePicker by remember { mutableStateOf(false) }
-
-    // Facebook OAuth WebView dialog
-    var showFbWebView  by remember { mutableStateOf(false) }
-    // TikTok OAuth WebView dialog
-    var showTikTokWebView by remember { mutableStateOf(false) }
-
-    // Facebook manual-entry dialog (App ID + App Secret + short-lived token)
-    var showFbDialog   by remember { mutableStateOf(false) }
-    // TikTok manual-entry dialog
-    var showTikTokDialog by remember { mutableStateOf(false) }
+    var showFbDialog             by remember { mutableStateOf(false) }
+    var showTikTokDialog         by remember { mutableStateOf(false) }
 
     var account by remember { mutableStateOf(GoogleAuthManager.getAccount(context)) }
+
+    // Re-read Google account when active profile changes
+    LaunchedEffect(activeProfile?.id) {
+        account = GoogleAuthManager.getAccount(context)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -84,22 +81,32 @@ fun SettingsScreen(
     val youtubeSignInLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        account = GoogleAuthManager.handleSignInResult(result.data)
-        if (account == null)
+        val signedIn = GoogleAuthManager.handleSignInResult(result.data)
+        account = signedIn
+        if (signedIn != null) {
+            viewModel.linkYouTubeToActiveProfile(signedIn.email ?: "", signedIn.displayName ?: "")
+            scope.launch { snackbarHostState.showSnackbar("YouTube connected to ${activeProfile?.name}!") }
+        } else {
             scope.launch { snackbarHostState.showSnackbar("Failed to connect to YouTube") }
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Settings", fontWeight = FontWeight.Bold,
-                        color = Color.White, fontSize = 20.sp)
+                    Column {
+                        Text("Settings", fontWeight = FontWeight.Bold,
+                            color = Color.White, fontSize = 20.sp)
+                        if (activeProfile != null) {
+                            Text("Profile: ${activeProfile!!.name}",
+                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))
@@ -117,7 +124,22 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
 
-            // ── Video settings ─────────────────────────────────────────────
+            // ── No profile warning ─────────────────────────────────────────
+            if (activeProfile == null) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(12.dp)) {
+                    Row(Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("⚠️", fontSize = 20.sp)
+                        Text("No active profile. Go to Profiles screen to create one.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+            }
+
+            // ── Video settings (global) ────────────────────────────────────
             SliderSetting("Images per short",
                 settings.imagesPerShort.toFloat(), 3f..8f, 4,
                 { viewModel.updateImagesPerShort(it.toInt()) })
@@ -150,7 +172,6 @@ fun SettingsScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            // Default filename
             Column {
                 Text("Default output filename",
                     style = MaterialTheme.typography.titleMedium,
@@ -166,18 +187,16 @@ fun SettingsScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            // ── Daily Reminder ─────────────────────────────────────────────
+            // ── Daily Reminder (global) ────────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Daily Reminder",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+                Row(Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                    horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
                         Text("Enable Daily Reminder",
                             style = MaterialTheme.typography.titleMedium,
@@ -187,8 +206,7 @@ fun SettingsScreen(
                                 String.format("Set for %02d:%02d", settings.reminderHour, settings.reminderMinute)
                             else "No reminder set",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (settings.reminderEnabled) {
@@ -207,14 +225,13 @@ fun SettingsScreen(
                                     else showTimePicker = true
                                 } else {
                                     viewModel.updateReminderEnabled(false)
-                                    com.jbr.shortsforge.engine.ReminderScheduler.cancelReminder(context)
+                                    ReminderScheduler.cancelReminder(context)
                                     scope.launch { snackbarHostState.showSnackbar("Reminder cancelled") }
                                 }
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                                checkedTrackColor = MaterialTheme.colorScheme.primary
-                            )
+                                checkedTrackColor = MaterialTheme.colorScheme.primary)
                         )
                     }
                 }
@@ -222,32 +239,31 @@ fun SettingsScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            // ── Daily Auto-Upload ──────────────────────────────────────────
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Daily Auto-Upload",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
+            // ── Daily Auto-Upload (per active profile) ─────────────────────
+            val autoUploadEnabled = activeProfile?.autoUploadEnabled ?: false
+            val autoUploadHour    = activeProfile?.autoUploadHour ?: 10
+            val autoUploadMinute  = activeProfile?.autoUploadMinute ?: 0
+            val autoUploadTitle   = activeProfile?.autoUploadTitle ?: ""
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                ProfileSectionHeader("Daily Auto-Upload", activeProfile?.name)
+
+                Row(Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                    horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
                         Text("Full Automation (Auto-Upload)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (settings.autoUploadEnabled)
-                                String.format("Scheduled for %02d:%02d", settings.autoUploadHour, settings.autoUploadMinute)
+                            if (autoUploadEnabled)
+                                String.format("Scheduled for %02d:%02d", autoUploadHour, autoUploadMinute)
                             else "Pick a time to auto-generate and upload daily",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (settings.autoUploadEnabled) {
+                        if (autoUploadEnabled) {
                             IconButton(onClick = { showAutoUploadTimePicker = true }) {
                                 Icon(Icons.Default.Edit, "Edit time",
                                     tint = MaterialTheme.colorScheme.primary,
@@ -255,7 +271,8 @@ fun SettingsScreen(
                             }
                         }
                         Switch(
-                            checked = settings.autoUploadEnabled,
+                            checked = autoUploadEnabled,
+                            enabled = activeProfile != null,
                             onCheckedChange = { enabled ->
                                 if (enabled) {
                                     if (account == null)
@@ -263,31 +280,26 @@ fun SettingsScreen(
                                     else showAutoUploadTimePicker = true
                                 } else {
                                     viewModel.updateAutoUploadEnabled(false)
-                                    AutoUploadScheduler.cancelAutoUpload(context)
-                                    scope.launch { snackbarHostState.showSnackbar("Auto-upload disabled") }
+                                    activeProfile?.let { ProfileScheduler.cancel(context, it.id) }
+                                    scope.launch { snackbarHostState.showSnackbar("Auto-upload disabled for ${activeProfile?.name}") }
                                 }
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                                checkedTrackColor = MaterialTheme.colorScheme.primary
-                            )
+                                checkedTrackColor = MaterialTheme.colorScheme.primary)
                         )
                     }
                 }
 
-                // YouTube title field
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("YouTube video title",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold)
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
+                        Box(Modifier.clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)) {
                             Text("Optional", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -295,8 +307,9 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
-                        value = settings.autoUploadTitle,
+                        value = autoUploadTitle,
                         onValueChange = { viewModel.updateAutoUploadTitle(it) },
+                        enabled = activeProfile != null,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         placeholder = {
@@ -305,26 +318,26 @@ fun SettingsScreen(
                         },
                         singleLine = true,
                         trailingIcon = {
-                            if (settings.autoUploadTitle.isNotEmpty()) {
+                            if (autoUploadTitle.isNotEmpty()) {
                                 IconButton(onClick = { viewModel.updateAutoUploadTitle("") }) {
                                     Icon(Icons.Default.Close, "Clear", Modifier.size(18.dp))
                                 }
                             }
                         }
                     )
-                    Text("${settings.autoUploadTitle.length}/100",
+                    Text("${autoUploadTitle.length}/100",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (settings.autoUploadTitle.length > 100) Color.Red
+                        color = if (autoUploadTitle.length > 100) Color.Red
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End)
                 }
 
-                if (settings.autoUploadEnabled) {
-                    Spacer(Modifier.height(8.dp))
+                if (autoUploadEnabled && activeProfile != null) {
+                    Spacer(Modifier.height(4.dp))
                     Button(
                         onClick = {
-                            AutoUploadScheduler.runTestNow(context)
-                            scope.launch { snackbarHostState.showSnackbar("Test automation started!") }
+                            ProfileScheduler.runTestNow(context, activeProfile!!.id)
+                            scope.launch { snackbarHostState.showSnackbar("Test automation started for ${activeProfile!!.name}!") }
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -335,118 +348,108 @@ fun SettingsScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            // ── Social Platforms ───────────────────────────────────────────
+            // ── Social Platforms (per active profile) ─────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Social Platforms",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-
+                ProfileSectionHeader("Social Platforms", activeProfile?.name)
                 Text("Connect platforms to auto-post your Shorts everywhere at once.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                // Facebook
-                PlatformConnectCard(
-                    platformName = "Facebook",
-                    subLabel = "Posts as a Reel to your Facebook Page",
-                    brandColor = FacebookBlue,
-                    isConnected = platformCreds.isFacebookConnected,
-                    connectedLabel = "Page ID: ${platformCreds.fbPageId}",
+                PlatformConnectCard("Facebook", FacebookBlue,
+                    "Posts as a Reel to your Facebook Page",
+                    platformCreds.isFacebookConnected, "Page ID: ${platformCreds.fbPageId}",
                     onConnect = { showFbDialog = true },
                     onDisconnect = {
-                        scope.launch {
-                            viewModel.disconnectFacebook()
-                            snackbarHostState.showSnackbar("Facebook disconnected")
-                        }
-                    }
-                )
+                        scope.launch { viewModel.disconnectFacebook(); snackbarHostState.showSnackbar("Facebook disconnected") }
+                    })
 
-                // Instagram
-                PlatformConnectCard(
-                    platformName = "Instagram",
-                    subLabel = "Posts as a Reel — requires Business/Creator account linked to a Facebook Page",
-                    brandColor = InstagramPink,
-                    isConnected = platformCreds.isInstagramConnected,
-                    connectedLabel = "IG User ID: ${platformCreds.igUserId}",
+                PlatformConnectCard("Instagram", InstagramPink,
+                    "Requires Business/Creator account linked to a Facebook Page",
+                    platformCreds.isInstagramConnected, "IG User ID: ${platformCreds.igUserId}",
                     onConnect = {
-                        if (!platformCreds.isFacebookConnected) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Connect Facebook first — Instagram uses the same token")
-                            }
-                        } else {
-                            // Auto-fetch IG user ID from the already-connected FB page
-                            scope.launch {
-                                val igId = InstagramUploadManager.fetchIgUserId(
-                                    platformCreds.fbPageId,
-                                    platformCreds.fbPageAccessToken
-                                )
-                                if (igId != null) {
-                                    viewModel.saveInstagram(igId)
-                                    snackbarHostState.showSnackbar("Instagram connected!")
-                                } else {
-                                    snackbarHostState.showSnackbar(
-                                        "No Instagram Business/Creator account found on this Facebook Page"
-                                    )
-                                }
-                            }
+                        if (!platformCreds.isFacebookConnected)
+                            scope.launch { snackbarHostState.showSnackbar("Connect Facebook first") }
+                        else scope.launch {
+                            val igId = InstagramUploadManager.fetchIgUserId(
+                                platformCreds.fbPageId, platformCreds.fbPageAccessToken)
+                            if (igId != null) { viewModel.saveInstagram(igId); snackbarHostState.showSnackbar("Instagram connected!") }
+                            else snackbarHostState.showSnackbar("No Instagram Business/Creator account found")
                         }
                     },
                     onDisconnect = {
-                        scope.launch {
-                            viewModel.disconnectInstagram()
-                            snackbarHostState.showSnackbar("Instagram disconnected")
-                        }
-                    }
-                )
+                        scope.launch { viewModel.disconnectInstagram(); snackbarHostState.showSnackbar("Instagram disconnected") }
+                    })
 
-                // TikTok
-                PlatformConnectCard(
-                    platformName = "TikTok",
-                    subLabel = "Uploads to TikTok Drafts (Direct Post requires TikTok approval)",
-                    brandColor = TikTokBlack,
-                    isConnected = platformCreds.isTikTokConnected,
-                    connectedLabel = "Connected",
+                PlatformConnectCard("TikTok", TikTokBlack,
+                    "Uploads to TikTok Drafts (Direct Post requires TikTok approval)",
+                    platformCreds.isTikTokConnected, "Connected",
                     onConnect = { showTikTokDialog = true },
                     onDisconnect = {
-                        scope.launch {
-                            viewModel.disconnectTikTok()
-                            snackbarHostState.showSnackbar("TikTok disconnected")
-                        }
-                    }
-                )
+                        scope.launch { viewModel.disconnectTikTok(); snackbarHostState.showSnackbar("TikTok disconnected") }
+                    })
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            // ── YouTube Account ────────────────────────────────────────────
+            // ── YouTube Account (per active profile) ──────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("YouTube Account",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
+                ProfileSectionHeader("YouTube Account", activeProfile?.name)
 
-                if (account == null) {
-                    Button(
-                        onClick = { youtubeSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context)) },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
-                    ) { Text("Connect YouTube", fontWeight = FontWeight.Bold) }
-                } else {
-                    Row(Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text("Connected as:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(account?.email ?: "Unknown",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold)
+                val profileYtEmail = activeProfile?.ytAccountEmail ?: ""
+
+                when {
+                    profileYtEmail.isNotBlank() -> {
+                        Row(Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("Linked to ${activeProfile?.name}:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(profileYtEmail,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                            }
+                            OutlinedButton(onClick = {
+                                viewModel.linkYouTubeToActiveProfile("", "")
+                                scope.launch { snackbarHostState.showSnackbar("YouTube unlinked") }
+                            }) { Text("Unlink") }
                         }
-                        OutlinedButton(onClick = {
-                            GoogleAuthManager.signOut(context); account = null
-                        }) { Text("Sign Out") }
+                    }
+                    account != null -> {
+                        Row(Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("Signed in as:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(account?.email ?: "",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                            }
+                            Button(
+                                onClick = {
+                                    account?.let { acc ->
+                                        viewModel.linkYouTubeToActiveProfile(acc.email ?: "", acc.displayName ?: "")
+                                        scope.launch { snackbarHostState.showSnackbar("YouTube linked to ${activeProfile?.name}!") }
+                                    }
+                                },
+                                enabled = activeProfile != null,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                            ) { Text("Link to Profile") }
+                        }
+                        TextButton(onClick = { GoogleAuthManager.signOut(context); account = null },
+                            modifier = Modifier.align(Alignment.End)) {
+                            Text("Sign out of Google", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    else -> {
+                        Button(
+                            onClick = { youtubeSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context)) },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+                        ) { Text("Connect YouTube", fontWeight = FontWeight.Bold) }
                     }
                 }
             }
@@ -467,12 +470,10 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     viewModel.updateReminderEnabled(true)
                     viewModel.updateReminderTime(state.hour, state.minute)
-                    com.jbr.shortsforge.engine.ReminderScheduler.scheduleDaily(context, state.hour, state.minute)
+                    ReminderScheduler.scheduleDaily(context, state.hour, state.minute)
                     showTimePicker = false
-                    scope.launch {
-                        snackbarHostState.showSnackbar(
-                            String.format("Reminder set for %02d:%02d!", state.hour, state.minute))
-                    }
+                    scope.launch { snackbarHostState.showSnackbar(
+                        String.format("Reminder set for %02d:%02d!", state.hour, state.minute)) }
                 }) { Text("Set Reminder") }
             },
             dismissButton = {
@@ -486,71 +487,83 @@ fun SettingsScreen(
 
     // ── Auto-upload time picker ────────────────────────────────────────────
     if (showAutoUploadTimePicker) {
-        val state = rememberTimePickerState(settings.autoUploadHour, settings.autoUploadMinute, true)
+        val h = activeProfile?.autoUploadHour ?: 10
+        val m = activeProfile?.autoUploadMinute ?: 0
+        val state = rememberTimePickerState(h, m, true)
         TimePickerDialog("Select Auto-Upload Time",
             onDismissRequest = { showAutoUploadTimePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.updateAutoUploadEnabled(true)
                     viewModel.updateAutoUploadTime(state.hour, state.minute)
-                    AutoUploadScheduler.scheduleDaily(context, state.hour, state.minute)
+                    activeProfile?.let { ProfileScheduler.scheduleDaily(context, it.id, state.hour, state.minute) }
                     showAutoUploadTimePicker = false
-                    scope.launch {
-                        snackbarHostState.showSnackbar(
-                            String.format("Auto-upload scheduled for %02d:%02d!", state.hour, state.minute))
-                    }
+                    scope.launch { snackbarHostState.showSnackbar(
+                        String.format("Auto-upload scheduled for %02d:%02d for ${activeProfile?.name}!",
+                            state.hour, state.minute)) }
                 }) { Text("Confirm") }
             },
-            dismissButton = {
-                TextButton(onClick = { showAutoUploadTimePicker = false }) { Text("Cancel") }
-            }
+            dismissButton = { TextButton(onClick = { showAutoUploadTimePicker = false }) { Text("Cancel") } }
         ) { TimeInput(state = state) }
     }
 
     // ── Facebook connect dialog ────────────────────────────────────────────
     if (showFbDialog) {
-        FacebookConnectDialog(
-            onDismiss = { showFbDialog = false },
+        FacebookConnectDialog(onDismiss = { showFbDialog = false },
             onConnect = { appId, appSecret, shortToken ->
                 showFbDialog = false
                 scope.launch {
                     snackbarHostState.showSnackbar("Connecting Facebook...")
-                    val triple = FacebookUploadManager.exchangeTokenAndFetchPage(
-                        shortToken, appId, appSecret
-                    )
+                    val triple = FacebookUploadManager.exchangeTokenAndFetchPage(shortToken, appId, appSecret)
                     if (triple != null) {
                         val (longToken, pageId, pageToken) = triple
                         viewModel.saveFacebook(longToken, pageId, pageToken)
                         snackbarHostState.showSnackbar("Facebook Page connected! Page ID: $pageId")
-                    } else {
-                        snackbarHostState.showSnackbar("Facebook connection failed — check your credentials")
-                    }
+                    } else snackbarHostState.showSnackbar("Facebook connection failed — check your credentials")
                 }
-            }
-        )
+            })
     }
 
     // ── TikTok connect dialog ──────────────────────────────────────────────
     if (showTikTokDialog) {
-        TikTokConnectDialog(
-            onDismiss = { showTikTokDialog = false },
+        TikTokConnectDialog(onDismiss = { showTikTokDialog = false },
             onConnect = { clientKey, clientSecret, authCode, redirectUri ->
                 showTikTokDialog = false
                 scope.launch {
                     snackbarHostState.showSnackbar("Connecting TikTok...")
-                    val pair = TikTokUploadManager.exchangeCodeForToken(
-                        authCode, clientKey, clientSecret, redirectUri
-                    )
-                    if (pair != null) {
-                        val (accessToken, openId) = pair
-                        viewModel.saveTikTok(accessToken, openId, clientKey, clientSecret)
+                    val tokenInfo = TikTokUploadManager.exchangeCodeForToken(authCode, clientKey, clientSecret, redirectUri)
+                    if (tokenInfo != null) {
+                        val expiry = System.currentTimeMillis() + (tokenInfo.expiresIn * 1000)
+                        viewModel.saveTikTok(
+                            tokenInfo.accessToken,
+                            tokenInfo.refreshToken,
+                            expiry,
+                            tokenInfo.openId,
+                            clientKey,
+                            clientSecret
+                        )
                         snackbarHostState.showSnackbar("TikTok connected!")
-                    } else {
-                        snackbarHostState.showSnackbar("TikTok connection failed — check your credentials")
-                    }
+                    } else snackbarHostState.showSnackbar("TikTok connection failed — check your credentials")
                 }
+            })
+    }
+}
+
+// ── Profile section header ─────────────────────────────────────────────────
+
+@Composable
+private fun ProfileSectionHeader(title: String, profileName: String?) {
+    Row(verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        if (profileName != null) {
+            Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(4.dp)) {
+                Text(profileName, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
             }
-        )
+        }
     }
 }
 
@@ -558,74 +571,42 @@ fun SettingsScreen(
 
 @Composable
 private fun PlatformConnectCard(
-    platformName: String,
-    subLabel: String,
-    brandColor: Color,
-    isConnected: Boolean,
-    connectedLabel: String,
-    onConnect: () -> Unit,
-    onDisconnect: () -> Unit
+    platformName: String, brandColor: Color, subLabel: String,
+    isConnected: Boolean, connectedLabel: String,
+    onConnect: () -> Unit, onDisconnect: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+    Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Coloured dot indicator
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(brandColor),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = platformName.take(2).uppercase(),
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                )
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(42.dp).clip(CircleShape).background(brandColor),
+                contentAlignment = Alignment.Center) {
+                Text(platformName.take(2).uppercase(), color = Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
-
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(platformName,
-                        style = MaterialTheme.typography.titleMedium,
+                    Text(platformName, style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
-                    if (isConnected) {
+                    if (isConnected)
                         Icon(Icons.Default.Check, "Connected",
                             tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
-                    }
                 }
-                Text(
-                    if (isConnected) connectedLabel else subLabel,
+                Text(if (isConnected) connectedLabel else subLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isConnected) Color(0xFF4CAF50)
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
             }
-
             if (isConnected) {
-                OutlinedButton(
-                    onClick = onDisconnect,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    ),
+                OutlinedButton(onClick = onDisconnect,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                     border = androidx.compose.foundation.BorderStroke(
-                        1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                    )
+                        1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
                 ) { Text("Disconnect", fontSize = 12.sp) }
             } else {
-                Button(
-                    onClick = onConnect,
+                Button(onClick = onConnect,
                     colors = ButtonDefaults.buttonColors(containerColor = brandColor)
                 ) { Text("Connect", fontSize = 12.sp, color = Color.White) }
             }
@@ -640,62 +621,38 @@ private fun FacebookConnectDialog(
     onDismiss: () -> Unit,
     onConnect: (appId: String, appSecret: String, shortToken: String) -> Unit
 ) {
-    var appId       by remember { mutableStateOf("") }
-    var appSecret   by remember { mutableStateOf("") }
-    var shortToken  by remember { mutableStateOf("") }
-    var showSecret  by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
+    var appId      by remember { mutableStateOf("") }
+    var appSecret  by remember { mutableStateOf("") }
+    var shortToken by remember { mutableStateOf("") }
+    var showSecret by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = onDismiss,
         title = { Text("Connect Facebook", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "1. Go to developers.facebook.com\n" +
-                    "2. Create a Business app\n" +
-                    "3. Add Pages API product\n" +
-                    "4. Get your App ID, App Secret\n" +
-                    "5. Generate a short-lived User Access Token\n" +
-                    "   via Graph API Explorer with pages_manage_posts scope",
+                Text("1. Go to developers.facebook.com\n2. Create a Business app\n" +
+                     "3. Add Pages API product\n4. Get your App ID, App Secret\n" +
+                     "5. Generate a short-lived User Access Token via Graph API Explorer\n" +
+                     "   with pages_manage_posts scope",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = appId, onValueChange = { appId = it },
-                    label = { Text("App ID") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = appSecret, onValueChange = { appSecret = it },
-                    label = { Text("App Secret") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = if (showSecret) VisualTransformation.None
-                                           else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        TextButton(onClick = { showSecret = !showSecret }) {
-                            Text(if (showSecret) "Hide" else "Show", fontSize = 11.sp)
-                        }
-                    }
-                )
-                OutlinedTextField(
-                    value = shortToken, onValueChange = { shortToken = it },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = appId, onValueChange = { appId = it },
+                    label = { Text("App ID") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(value = appSecret, onValueChange = { appSecret = it },
+                    label = { Text("App Secret") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    visualTransformation = if (showSecret) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { TextButton(onClick = { showSecret = !showSecret }) {
+                        Text(if (showSecret) "Hide" else "Show", fontSize = 11.sp) } })
+                OutlinedTextField(value = shortToken, onValueChange = { shortToken = it },
                     label = { Text("Short-lived User Access Token") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onConnect(appId.trim(), appSecret.trim(), shortToken.trim()) },
+            Button(onClick = { onConnect(appId.trim(), appSecret.trim(), shortToken.trim()) },
                 enabled = appId.isNotBlank() && appSecret.isNotBlank() && shortToken.isNotBlank()
             ) { Text("Connect") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
 
@@ -715,73 +672,41 @@ private fun TikTokConnectDialog(
 
     if (showWebView && clientKey.isNotBlank() && redirectUri.isNotBlank()) {
         val authUrl = TikTokUploadManager.buildAuthUrl(clientKey.trim(), redirectUri.trim())
-        TikTokOAuthWebView(
-            url = authUrl,
-            redirectUri = redirectUri.trim(),
-            onCodeReceived = { code ->
-                authCode = code
-                showWebView = false
-            },
-            onDismiss = { showWebView = false }
-        )
+        TikTokOAuthWebView(url = authUrl, redirectUri = redirectUri.trim(),
+            onCodeReceived = { code -> authCode = code; showWebView = false },
+            onDismiss = { showWebView = false })
         return
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
+    AlertDialog(onDismissRequest = onDismiss,
         title = { Text("Connect TikTok", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "1. Go to developers.tiktok.com\n" +
-                    "2. Create an app & add Content Posting API\n" +
-                    "3. Request scope: video.upload\n" +
-                    "4. Enter your Client Key, Secret & redirect URI\n" +
-                    "5. Tap 'Open TikTok Login' to authorise",
+                Text("1. Go to developers.tiktok.com\n2. Create an app & add Content Posting API\n" +
+                     "3. Request scope: video.upload\n4. Enter your Client Key, Secret & redirect URI\n" +
+                     "5. Tap 'Open TikTok Login' to authorise",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = clientKey, onValueChange = { clientKey = it },
-                    label = { Text("Client Key") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
-                OutlinedTextField(
-                    value = clientSecret, onValueChange = { clientSecret = it },
-                    label = { Text("Client Secret") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    visualTransformation = if (showSecret) VisualTransformation.None
-                                           else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        TextButton(onClick = { showSecret = !showSecret }) {
-                            Text(if (showSecret) "Hide" else "Show", fontSize = 11.sp)
-                        }
-                    }
-                )
-                OutlinedTextField(
-                    value = redirectUri, onValueChange = { redirectUri = it },
-                    label = { Text("Redirect URI") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
-                )
-
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = clientKey, onValueChange = { clientKey = it },
+                    label = { Text("Client Key") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(value = clientSecret, onValueChange = { clientSecret = it },
+                    label = { Text("Client Secret") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    visualTransformation = if (showSecret) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { TextButton(onClick = { showSecret = !showSecret }) {
+                        Text(if (showSecret) "Hide" else "Show", fontSize = 11.sp) } })
+                OutlinedTextField(value = redirectUri, onValueChange = { redirectUri = it },
+                    label = { Text("Redirect URI") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 if (authCode.isNotBlank()) {
-                    Surface(
-                        color = Color(0xFF4CAF50).copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Row(Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                    Surface(color = Color(0xFF4CAF50).copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
+                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Check, null,
-                                tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
-                            Text("Auth code received ✓",
-                                color = Color(0xFF4CAF50),
+                            Icon(Icons.Default.Check, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+                            Text("Auth code received ✓", color = Color(0xFF4CAF50),
                                 style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 } else {
-                    Button(
-                        onClick = { showWebView = true },
+                    Button(onClick = { showWebView = true },
                         enabled = clientKey.isNotBlank() && redirectUri.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = TikTokBlack)
@@ -790,8 +715,7 @@ private fun TikTokConnectDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onConnect(clientKey.trim(), clientSecret.trim(), authCode.trim(), redirectUri.trim()) },
+            Button(onClick = { onConnect(clientKey.trim(), clientSecret.trim(), authCode.trim(), redirectUri.trim()) },
                 enabled = clientKey.isNotBlank() && clientSecret.isNotBlank() && authCode.isNotBlank()
             ) { Text("Connect") }
         },
@@ -803,57 +727,38 @@ private fun TikTokConnectDialog(
 
 @Composable
 fun TikTokOAuthWebView(
-    url: String,
-    redirectUri: String,
-    onCodeReceived: (code: String) -> Unit,
-    onDismiss: () -> Unit
+    url: String, redirectUri: String,
+    onCodeReceived: (code: String) -> Unit, onDismiss: () -> Unit
 ) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(16.dp)
-        ) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(16.dp)) {
             Column {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                Row(Modifier.fillMaxWidth().padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                    verticalAlignment = Alignment.CenterVertically) {
                     Text("TikTok Login", fontWeight = FontWeight.Bold)
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Close")
-                    }
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close") }
                 }
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView, request: WebResourceRequest
-                                ): Boolean {
-                                    val uri = request.url.toString()
-                                    if (uri.startsWith(redirectUri)) {
-                                        val code = request.url.getQueryParameter("code") ?: ""
-                                        if (code.isNotBlank()) onCodeReceived(code)
-                                        else onDismiss()
-                                        return true
-                                    }
-                                    return false
+                AndroidView(factory = { ctx ->
+                    WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView, request: WebResourceRequest): Boolean {
+                                val uri = request.url.toString()
+                                if (uri.startsWith(redirectUri)) {
+                                    val code = request.url.getQueryParameter("code") ?: ""
+                                    if (code.isNotBlank()) onCodeReceived(code) else onDismiss()
+                                    return true
                                 }
+                                return false
                             }
-                            loadUrl(url)
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                        loadUrl(url)
+                    }
+                }, modifier = Modifier.fillMaxSize())
             }
         }
     }
@@ -864,38 +769,23 @@ fun TikTokOAuthWebView(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimePickerDialog(
-    title: String = "Select Time",
-    onDismissRequest: () -> Unit,
+    title: String = "Select Time", onDismissRequest: () -> Unit,
     confirmButton: @Composable () -> Unit,
     dismissButton: @Composable (() -> Unit)? = null,
     containerColor: Color = MaterialTheme.colorScheme.surface,
     content: @Composable () -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismissRequest,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            shape = MaterialTheme.shapes.extraLarge,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .width(IntrinsicSize.Min)
-                .height(IntrinsicSize.Min)
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(shape = MaterialTheme.shapes.extraLarge, tonalElevation = 6.dp,
+            modifier = Modifier.width(IntrinsicSize.Min).height(IntrinsicSize.Min)
                 .background(shape = MaterialTheme.shapes.extraLarge, color = containerColor),
-            color = containerColor
-        ) {
-            Column(
-                Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-            Text(
-    text = title,
-    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-    style = MaterialTheme.typography.labelMedium
-)
+            color = containerColor) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(text = title, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                    style = MaterialTheme.typography.labelMedium)
                 content()
-                Row(Modifier.height(40.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End) {
+                Row(Modifier.height(40.dp).fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     dismissButton?.invoke()
                     confirmButton()
                 }
@@ -907,49 +797,36 @@ fun TimePickerDialog(
 // ── Reusable composables ───────────────────────────────────────────────────
 
 @Composable
-private fun SliderSetting(
-    label: String, value: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    steps: Int, onValueChange: (Float) -> Unit
-) {
+private fun SliderSetting(label: String, value: Float,
+    valueRange: ClosedFloatingPointRange<Float>, steps: Int, onValueChange: (Float) -> Unit) {
     Column {
-        Row(Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(value.toInt().toString(),
-                style = MaterialTheme.typography.titleMedium,
+            Text(value.toInt().toString(), style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
         }
-        Slider(value = value, onValueChange = onValueChange,
-            valueRange = valueRange, steps = steps,
-            colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
+        Slider(value = value, onValueChange = onValueChange, valueRange = valueRange, steps = steps,
+            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.primaryContainer
-            ))
+                inactiveTrackColor = MaterialTheme.colorScheme.primaryContainer))
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DropdownSetting(
-    label: String, selectedOption: String,
-    options: List<String>, onOptionSelected: (String) -> Unit
-) {
+private fun DropdownSetting(label: String, selectedOption: String,
+    options: List<String>, onOptionSelected: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Column {
         Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(12.dp))
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-            OutlinedTextField(
-                value = selectedOption, onValueChange = {}, readOnly = true,
+            OutlinedTextField(value = selectedOption, onValueChange = {}, readOnly = true,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                 colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-            )
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
             ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { option ->
                     DropdownMenuItem(text = { Text(option) },
@@ -961,12 +838,9 @@ private fun DropdownSetting(
 }
 
 @Composable
-private fun ToggleSetting(
-    label: String, subLabel: String,
-    checked: Boolean, onCheckedChange: (Boolean) -> Unit
-) {
-    Row(Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+private fun ToggleSetting(label: String, subLabel: String,
+    checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -974,9 +848,7 @@ private fun ToggleSetting(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary
-            ))
+            colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary))
     }
 }

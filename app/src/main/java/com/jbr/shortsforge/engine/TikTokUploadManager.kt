@@ -41,6 +41,13 @@ object TikTokUploadManager {
         .writeTimeout(300, TimeUnit.SECONDS)
         .build()
 
+    data class TikTokTokenInfo(
+        val accessToken: String,
+        val refreshToken: String,
+        val openId: String,
+        val expiresIn: Long // seconds
+    )
+
     /**
      * Full chunked upload to TikTok.
      *
@@ -231,7 +238,7 @@ object TikTokUploadManager {
         clientKey: String,
         clientSecret: String,
         redirectUri: String
-    ): Pair<String, String>? = withContext(Dispatchers.IO) {
+    ): TikTokTokenInfo? = withContext(Dispatchers.IO) {
         try {
             val payload = JSONObject().apply {
                 put("client_key", clientKey)
@@ -251,12 +258,53 @@ object TikTokUploadManager {
             val json = JSONObject(response.body?.string() ?: "{}")
 
             val accessToken = json.optString("access_token")
+            val refreshToken = json.optString("refresh_token")
             val openId = json.optString("open_id")
+            val expiresIn = json.optLong("expires_in", 86400L)
 
             if (accessToken.isBlank() || openId.isBlank()) null
-            else Pair(accessToken, openId)
+            else TikTokTokenInfo(accessToken, refreshToken, openId, expiresIn)
         } catch (e: Exception) {
             Log.e(TAG, "TikTok token exchange failed", e)
+            null
+        }
+    }
+
+    /**
+     * Refreshes the access token using a refresh_token.
+     * Returns New TokenInfo or null on failure.
+     */
+    suspend fun refreshAccessToken(
+        refreshToken: String,
+        clientKey: String,
+        clientSecret: String
+    ): TikTokTokenInfo? = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("client_key", clientKey)
+                put("client_secret", clientSecret)
+                put("grant_type", "refresh_token")
+                put("refresh_token", refreshToken)
+            }
+
+            val request = Request.Builder()
+                .url("$API_BASE/oauth/token/")
+                .addHeader("Content-Type", "application/json; charset=UTF-8")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            val json = JSONObject(response.body?.string() ?: "{}")
+
+            val newAccess = json.optString("access_token")
+            val newRefresh = json.optString("refresh_token", refreshToken)
+            val openId = json.optString("open_id")
+            val expiresIn = json.optLong("expires_in", 86400L)
+
+            if (newAccess.isBlank()) null
+            else TikTokTokenInfo(newAccess, newRefresh, openId, expiresIn)
+        } catch (e: Exception) {
+            Log.e(TAG, "TikTok token refresh failed", e)
             null
         }
     }

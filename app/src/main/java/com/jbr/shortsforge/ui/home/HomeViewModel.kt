@@ -7,24 +7,17 @@ import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jbr.shortsforge.data.model.ImageItem
+import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.model.ProjectEntity
+import com.jbr.shortsforge.data.repository.ProfileRepository
 import com.jbr.shortsforge.data.repository.ProjectRepository
-import com.jbr.shortsforge.data.preferences.FolderPreferencesRepository
 import com.jbr.shortsforge.data.repository.ImageRepository
 import com.jbr.shortsforge.engine.AutoGenerateEngine
 import com.jbr.shortsforge.data.model.SlideItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -35,15 +28,14 @@ data class HomeUiState(
     val projects: List<ProjectEntity> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
-    // Selection mode
     val isSelectionMode: Boolean = false,
-    val selectedImageIds: LinkedHashSet<String> = LinkedHashSet() // preserves order
+    val selectedImageIds: LinkedHashSet<String> = LinkedHashSet()
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val folderPrefs: FolderPreferencesRepository,
+    private val profileRepository: ProfileRepository,
     private val imageRepository: ImageRepository,
     private val projectRepository: ProjectRepository,
     private val autoGenerateEngine: AutoGenerateEngine
@@ -56,20 +48,45 @@ class HomeViewModel @Inject constructor(
     val navigationEvent: SharedFlow<List<SlideItem>> = _navigationEvent.asSharedFlow()
 
     init {
+        // Load projects
         projectRepository.allProjects
             .onEach { projects ->
                 _uiState.value = _uiState.value.copy(projects = projects)
             }
             .launchIn(viewModelScope)
 
-        viewModelScope.launch {
-            val savedUriString = folderPrefs.folderUriFlow.first()
-            if (!savedUriString.isNullOrBlank()) {
-                val uri = Uri.parse(savedUriString)
-                _uiState.value = _uiState.value.copy(folderUri = uri, isLoading = true)
-                loadImages(uri)
+        // ── React to active profile changes ───────────────────────────────
+        // Whenever the active profile switches, reload the folder + images
+        profileRepository.activeProfile
+            .distinctUntilChanged { old, new ->
+                old?.id == new?.id && old?.folderUri == new?.folderUri
             }
+            .onEach { profile -> onActiveProfileChanged(profile) }
+            .launchIn(viewModelScope)
+    }
+
+    private suspend fun onActiveProfileChanged(profile: ProfileEntity?) {
+        if (profile == null || profile.folderUri.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                folderUri = null,
+                images = emptyList(),
+                isLoading = false,
+                error = null,
+                isSelectionMode = false,
+                selectedImageIds = LinkedHashSet()
+            )
+            return
         }
+
+        val uri = Uri.parse(profile.folderUri)
+        _uiState.value = _uiState.value.copy(
+            folderUri = uri,
+            isLoading = true,
+            error = null,
+            isSelectionMode = false,
+            selectedImageIds = LinkedHashSet()
+        )
+        loadImages(uri)
     }
 
     fun onFolderPicked(treeUri: Uri) {
@@ -78,7 +95,13 @@ class HomeViewModel @Inject constructor(
                 treeUri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            folderPrefs.saveFolderUri(treeUri.toString())
+
+            // Save folder to the active profile
+            val activeProfile = profileRepository.activeProfile.first()
+            if (activeProfile != null) {
+                profileRepository.updateFolder(activeProfile.id, treeUri.toString())
+            }
+
             _uiState.value = _uiState.value.copy(
                 folderUri = treeUri,
                 isLoading = true,
@@ -114,7 +137,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // ── Selection Mode Functions ───────────────────────────────────────────────
+    // ── Selection Mode ─────────────────────────────────────────────────────
 
     fun toggleSelectionMode() {
         val current = _uiState.value
@@ -127,8 +150,7 @@ class HomeViewModel @Inject constructor(
     fun toggleImageSelection(imageId: String) {
         val current = _uiState.value
         val newSet = LinkedHashSet(current.selectedImageIds)
-        if (newSet.contains(imageId)) newSet.remove(imageId)
-        else newSet.add(imageId)
+        if (newSet.contains(imageId)) newSet.remove(imageId) else newSet.add(imageId)
         _uiState.value = current.copy(selectedImageIds = newSet)
     }
 
@@ -141,7 +163,7 @@ class HomeViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(selectedImageIds = LinkedHashSet())
     }
 
-    // ── Create Functions ───────────────────────────────────────────────────────
+    // ── Create ─────────────────────────────────────────────────────────────
 
     fun onCreateShort() {
         val currentImages = _uiState.value.images
@@ -160,7 +182,6 @@ class HomeViewModel @Inject constructor(
             Toast.makeText(context, "Select at least 2 images", Toast.LENGTH_SHORT).show()
             return
         }
-        // Get images in selection order
         val selectedImages = current.selectedImageIds
             .mapNotNull { id -> current.images.find { it.id == id } }
 

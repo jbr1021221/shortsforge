@@ -15,7 +15,7 @@ import com.jbr.shortsforge.data.model.ProjectImageEntity
         ProjectImageEntity::class,
         ProfileEntity::class          // NEW
     ],
-    version = 3,                      // bumped from 2 → 3
+    version = 4,                      // bumped from 3 → 4
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

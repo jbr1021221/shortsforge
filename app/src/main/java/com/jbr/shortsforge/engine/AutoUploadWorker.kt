@@ -14,6 +14,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import androidx.work.ExistingWorkPolicy
 import com.jbr.shortsforge.MainActivity
 import com.jbr.shortsforge.data.model.MusicSettings
 import com.jbr.shortsforge.data.preferences.AppSettingsRepository
@@ -208,7 +209,7 @@ class AutoUploadWorker @AssistedInject constructor(
                         applicationContext,
                         settings.autoUploadHour,
                         settings.autoUploadMinute,
-                        forceReschedule = false
+                        policy = ExistingWorkPolicy.REPLACE
                     )
                 }
             }

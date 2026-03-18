@@ -10,13 +10,13 @@ object ProfileScheduler {
 
     private const val TAG = "ProfileScheduler"
 
-    fun scheduleDaily(context: Context, profileId: Long, hour: Int, minute: Int) {
-        scheduleAt(context, profileId, hour, minute)
+    fun scheduleDaily(context: Context, profileId: Long, hour: Int, minute: Int, policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE) {
+        scheduleAt(context, profileId, hour, minute, policy)
     }
 
-    fun scheduleHourly(context: Context, profileId: Long, startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+    fun scheduleHourly(context: Context, profileId: Long, startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY), policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE) {
         val nextHour = (startHour + 1) % 24
-        scheduleAt(context, profileId, nextHour, 0)
+        scheduleAt(context, profileId, nextHour, 0, policy)
         Log.d(TAG, "Profile $profileId hourly: next at $nextHour:00")
     }
 
@@ -40,7 +40,7 @@ object ProfileScheduler {
         Log.d(TAG, "Test run triggered for profile $profileId")
     }
 
-    private fun scheduleAt(context: Context, profileId: Long, hour: Int, minute: Int) {
+    private fun scheduleAt(context: Context, profileId: Long, hour: Int, minute: Int, policy: ExistingWorkPolicy) {
         val now = Calendar.getInstance()
         val target = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
@@ -72,7 +72,7 @@ object ProfileScheduler {
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             workName(profileId),
-            ExistingWorkPolicy.REPLACE,
+            policy,
             request
         )
     }
