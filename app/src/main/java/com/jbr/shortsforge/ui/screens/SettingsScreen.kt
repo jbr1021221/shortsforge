@@ -1,0 +1,982 @@
+package com.jbr.shortsforge.ui.screens
+
+import android.Manifest
+import android.os.Build
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.jbr.shortsforge.engine.*
+import com.jbr.shortsforge.ui.settings.SettingsViewModel
+import kotlinx.coroutines.launch
+
+// ── Platform brand colours ─────────────────────────────────────────────────
+private val FacebookBlue  = Color(0xFF1877F2)
+private val InstagramPink = Color(0xFFE1306C)
+private val TikTokBlack   = Color(0xFF010101)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel(),
+    onNavigateBack: () -> Unit
+) {
+    val settings     by viewModel.settings.collectAsStateWithLifecycle()
+    val platformCreds by viewModel.platformCredentials.collectAsStateWithLifecycle()
+    val context      = LocalContext.current
+    val scope        = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var showTimePicker           by remember { mutableStateOf(false) }
+    var showAutoUploadTimePicker by remember { mutableStateOf(false) }
+
+    // Facebook OAuth WebView dialog
+    var showFbWebView  by remember { mutableStateOf(false) }
+    // TikTok OAuth WebView dialog
+    var showTikTokWebView by remember { mutableStateOf(false) }
+
+    // Facebook manual-entry dialog (App ID + App Secret + short-lived token)
+    var showFbDialog   by remember { mutableStateOf(false) }
+    // TikTok manual-entry dialog
+    var showTikTokDialog by remember { mutableStateOf(false) }
+
+    var account by remember { mutableStateOf(GoogleAuthManager.getAccount(context)) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) showTimePicker = true
+        else {
+            scope.launch { snackbarHostState.showSnackbar("Notification permission required for reminders") }
+            viewModel.updateReminderEnabled(false)
+        }
+    }
+
+    val youtubeSignInLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        account = GoogleAuthManager.handleSignInResult(result.data)
+        if (account == null)
+            scope.launch { snackbarHostState.showSnackbar("Failed to connect to YouTube") }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text("Settings", fontWeight = FontWeight.Bold,
+                        color = Color.White, fontSize = 20.sp)
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+
+            // ── Video settings ─────────────────────────────────────────────
+            SliderSetting("Images per short",
+                settings.imagesPerShort.toFloat(), 3f..8f, 4,
+                { viewModel.updateImagesPerShort(it.toInt()) })
+
+            SliderSetting("Video duration (seconds)",
+                settings.videoDuration.toFloat(), 10f..30f, 19,
+                { viewModel.updateVideoDuration(it.toInt()) })
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            DropdownSetting("Aspect ratio", settings.aspectRatio,
+                listOf("9:16", "1:1", "16:9")) { viewModel.updateAspectRatio(it) }
+
+            DropdownSetting("Default transition", settings.defaultTransition,
+                listOf("Random", "Fade", "Slide", "Zoom", "Dissolve")) { viewModel.updateDefaultTransition(it) }
+
+            DropdownSetting("Default filter", settings.defaultFilter,
+                listOf("Random", "None", "Vintage", "B&W", "Warm", "Cool")) { viewModel.updateDefaultFilter(it) }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            ToggleSetting("Output resolution: ${settings.outputResolution}",
+                "Toggle between 720p and 1080p",
+                settings.outputResolution == "1080p") {
+                viewModel.updateOutputResolution(if (it) "1080p" else "720p")
+            }
+
+            ToggleSetting("Auto-add text overlay", "Default to ON",
+                settings.autoAddTextOverlay) { viewModel.updateAutoAddTextOverlay(it) }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // Default filename
+            Column {
+                Text("Default output filename",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = settings.defaultFileName,
+                    onValueChange = { viewModel.updateDefaultFileName(it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // ── Daily Reminder ─────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Daily Reminder",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Enable Daily Reminder",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (settings.reminderEnabled)
+                                String.format("Set for %02d:%02d", settings.reminderHour, settings.reminderMinute)
+                            else "No reminder set",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (settings.reminderEnabled) {
+                            IconButton(onClick = { showTimePicker = true }) {
+                                Icon(Icons.Default.Edit, "Edit time",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Switch(
+                            checked = settings.reminderEnabled,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    else showTimePicker = true
+                                } else {
+                                    viewModel.updateReminderEnabled(false)
+                                    com.jbr.shortsforge.engine.ReminderScheduler.cancelReminder(context)
+                                    scope.launch { snackbarHostState.showSnackbar("Reminder cancelled") }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // ── Daily Auto-Upload ──────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Daily Auto-Upload",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Full Automation (Auto-Upload)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (settings.autoUploadEnabled)
+                                String.format("Scheduled for %02d:%02d", settings.autoUploadHour, settings.autoUploadMinute)
+                            else "Pick a time to auto-generate and upload daily",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (settings.autoUploadEnabled) {
+                            IconButton(onClick = { showAutoUploadTimePicker = true }) {
+                                Icon(Icons.Default.Edit, "Edit time",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Switch(
+                            checked = settings.autoUploadEnabled,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    if (account == null)
+                                        scope.launch { snackbarHostState.showSnackbar("Please connect YouTube account first") }
+                                    else showAutoUploadTimePicker = true
+                                } else {
+                                    viewModel.updateAutoUploadEnabled(false)
+                                    AutoUploadScheduler.cancelAutoUpload(context)
+                                    scope.launch { snackbarHostState.showSnackbar("Auto-upload disabled") }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
+
+                // YouTube title field
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("YouTube video title",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold)
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("Optional", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    Text("If blank, the text overlay from the video is used as the title",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(
+                        value = settings.autoUploadTitle,
+                        onValueChange = { viewModel.updateAutoUploadTitle(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        placeholder = {
+                            Text("e.g. Daily Motivation #Shorts",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                        },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (settings.autoUploadTitle.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.updateAutoUploadTitle("") }) {
+                                    Icon(Icons.Default.Close, "Clear", Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    )
+                    Text("${settings.autoUploadTitle.length}/100",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (settings.autoUploadTitle.length > 100) Color.Red
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End)
+                }
+
+                if (settings.autoUploadEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            AutoUploadScheduler.runTestNow(context)
+                            scope.launch { snackbarHostState.showSnackbar("Test automation started!") }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF4CAF50), contentColor = Color.White)
+                    ) { Text("Test Automation Now", fontWeight = FontWeight.Bold) }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // ── Social Platforms ───────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Social Platforms",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+
+                Text("Connect platforms to auto-post your Shorts everywhere at once.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                // Facebook
+                PlatformConnectCard(
+                    platformName = "Facebook",
+                    subLabel = "Posts as a Reel to your Facebook Page",
+                    brandColor = FacebookBlue,
+                    isConnected = platformCreds.isFacebookConnected,
+                    connectedLabel = "Page ID: ${platformCreds.fbPageId}",
+                    onConnect = { showFbDialog = true },
+                    onDisconnect = {
+                        scope.launch {
+                            viewModel.disconnectFacebook()
+                            snackbarHostState.showSnackbar("Facebook disconnected")
+                        }
+                    }
+                )
+
+                // Instagram
+                PlatformConnectCard(
+                    platformName = "Instagram",
+                    subLabel = "Posts as a Reel — requires Business/Creator account linked to a Facebook Page",
+                    brandColor = InstagramPink,
+                    isConnected = platformCreds.isInstagramConnected,
+                    connectedLabel = "IG User ID: ${platformCreds.igUserId}",
+                    onConnect = {
+                        if (!platformCreds.isFacebookConnected) {
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Connect Facebook first — Instagram uses the same token")
+                            }
+                        } else {
+                            // Auto-fetch IG user ID from the already-connected FB page
+                            scope.launch {
+                                val igId = InstagramUploadManager.fetchIgUserId(
+                                    platformCreds.fbPageId,
+                                    platformCreds.fbPageAccessToken
+                                )
+                                if (igId != null) {
+                                    viewModel.saveInstagram(igId)
+                                    snackbarHostState.showSnackbar("Instagram connected!")
+                                } else {
+                                    snackbarHostState.showSnackbar(
+                                        "No Instagram Business/Creator account found on this Facebook Page"
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    onDisconnect = {
+                        scope.launch {
+                            viewModel.disconnectInstagram()
+                            snackbarHostState.showSnackbar("Instagram disconnected")
+                        }
+                    }
+                )
+
+                // TikTok
+                PlatformConnectCard(
+                    platformName = "TikTok",
+                    subLabel = "Uploads to TikTok Drafts (Direct Post requires TikTok approval)",
+                    brandColor = TikTokBlack,
+                    isConnected = platformCreds.isTikTokConnected,
+                    connectedLabel = "Connected",
+                    onConnect = { showTikTokDialog = true },
+                    onDisconnect = {
+                        scope.launch {
+                            viewModel.disconnectTikTok()
+                            snackbarHostState.showSnackbar("TikTok disconnected")
+                        }
+                    }
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            // ── YouTube Account ────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("YouTube Account",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+
+                if (account == null) {
+                    Button(
+                        onClick = { youtubeSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context)) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+                    ) { Text("Connect YouTube", fontWeight = FontWeight.Bold) }
+                } else {
+                    Row(Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Connected as:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(account?.email ?: "Unknown",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                        OutlinedButton(onClick = {
+                            GoogleAuthManager.signOut(context); account = null
+                        }) { Text("Sign Out") }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    // ── Reminder time picker ───────────────────────────────────────────────
+    if (showTimePicker) {
+        val state = rememberTimePickerState(settings.reminderHour, settings.reminderMinute, true)
+        TimePickerDialog("Set Reminder Time",
+            onDismissRequest = {
+                showTimePicker = false
+                if (!settings.reminderEnabled) viewModel.updateReminderEnabled(false)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateReminderEnabled(true)
+                    viewModel.updateReminderTime(state.hour, state.minute)
+                    com.jbr.shortsforge.engine.ReminderScheduler.scheduleDaily(context, state.hour, state.minute)
+                    showTimePicker = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            String.format("Reminder set for %02d:%02d!", state.hour, state.minute))
+                    }
+                }) { Text("Set Reminder") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showTimePicker = false
+                    if (!settings.reminderEnabled) viewModel.updateReminderEnabled(false)
+                }) { Text("Cancel") }
+            }
+        ) { TimeInput(state = state) }
+    }
+
+    // ── Auto-upload time picker ────────────────────────────────────────────
+    if (showAutoUploadTimePicker) {
+        val state = rememberTimePickerState(settings.autoUploadHour, settings.autoUploadMinute, true)
+        TimePickerDialog("Select Auto-Upload Time",
+            onDismissRequest = { showAutoUploadTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateAutoUploadEnabled(true)
+                    viewModel.updateAutoUploadTime(state.hour, state.minute)
+                    AutoUploadScheduler.scheduleDaily(context, state.hour, state.minute)
+                    showAutoUploadTimePicker = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            String.format("Auto-upload scheduled for %02d:%02d!", state.hour, state.minute))
+                    }
+                }) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoUploadTimePicker = false }) { Text("Cancel") }
+            }
+        ) { TimeInput(state = state) }
+    }
+
+    // ── Facebook connect dialog ────────────────────────────────────────────
+    if (showFbDialog) {
+        FacebookConnectDialog(
+            onDismiss = { showFbDialog = false },
+            onConnect = { appId, appSecret, shortToken ->
+                showFbDialog = false
+                scope.launch {
+                    snackbarHostState.showSnackbar("Connecting Facebook...")
+                    val triple = FacebookUploadManager.exchangeTokenAndFetchPage(
+                        shortToken, appId, appSecret
+                    )
+                    if (triple != null) {
+                        val (longToken, pageId, pageToken) = triple
+                        viewModel.saveFacebook(longToken, pageId, pageToken)
+                        snackbarHostState.showSnackbar("Facebook Page connected! Page ID: $pageId")
+                    } else {
+                        snackbarHostState.showSnackbar("Facebook connection failed — check your credentials")
+                    }
+                }
+            }
+        )
+    }
+
+    // ── TikTok connect dialog ──────────────────────────────────────────────
+    if (showTikTokDialog) {
+        TikTokConnectDialog(
+            onDismiss = { showTikTokDialog = false },
+            onConnect = { clientKey, clientSecret, authCode, redirectUri ->
+                showTikTokDialog = false
+                scope.launch {
+                    snackbarHostState.showSnackbar("Connecting TikTok...")
+                    val pair = TikTokUploadManager.exchangeCodeForToken(
+                        authCode, clientKey, clientSecret, redirectUri
+                    )
+                    if (pair != null) {
+                        val (accessToken, openId) = pair
+                        viewModel.saveTikTok(accessToken, openId, clientKey, clientSecret)
+                        snackbarHostState.showSnackbar("TikTok connected!")
+                    } else {
+                        snackbarHostState.showSnackbar("TikTok connection failed — check your credentials")
+                    }
+                }
+            }
+        )
+    }
+}
+
+// ── Platform connect card ──────────────────────────────────────────────────
+
+@Composable
+private fun PlatformConnectCard(
+    platformName: String,
+    subLabel: String,
+    brandColor: Color,
+    isConnected: Boolean,
+    connectedLabel: String,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Coloured dot indicator
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(brandColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = platformName.take(2).uppercase(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(platformName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold)
+                    if (isConnected) {
+                        Icon(Icons.Default.Check, "Connected",
+                            tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+                    }
+                }
+                Text(
+                    if (isConnected) connectedLabel else subLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isConnected) Color(0xFF4CAF50)
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (isConnected) {
+                OutlinedButton(
+                    onClick = onDisconnect,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                    )
+                ) { Text("Disconnect", fontSize = 12.sp) }
+            } else {
+                Button(
+                    onClick = onConnect,
+                    colors = ButtonDefaults.buttonColors(containerColor = brandColor)
+                ) { Text("Connect", fontSize = 12.sp, color = Color.White) }
+            }
+        }
+    }
+}
+
+// ── Facebook connect dialog ────────────────────────────────────────────────
+
+@Composable
+private fun FacebookConnectDialog(
+    onDismiss: () -> Unit,
+    onConnect: (appId: String, appSecret: String, shortToken: String) -> Unit
+) {
+    var appId       by remember { mutableStateOf("") }
+    var appSecret   by remember { mutableStateOf("") }
+    var shortToken  by remember { mutableStateOf("") }
+    var showSecret  by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect Facebook", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "1. Go to developers.facebook.com\n" +
+                    "2. Create a Business app\n" +
+                    "3. Add Pages API product\n" +
+                    "4. Get your App ID, App Secret\n" +
+                    "5. Generate a short-lived User Access Token\n" +
+                    "   via Graph API Explorer with pages_manage_posts scope",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = appId, onValueChange = { appId = it },
+                    label = { Text("App ID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = appSecret, onValueChange = { appSecret = it },
+                    label = { Text("App Secret") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (showSecret) VisualTransformation.None
+                                           else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { showSecret = !showSecret }) {
+                            Text(if (showSecret) "Hide" else "Show", fontSize = 11.sp)
+                        }
+                    }
+                )
+                OutlinedTextField(
+                    value = shortToken, onValueChange = { shortToken = it },
+                    label = { Text("Short-lived User Access Token") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConnect(appId.trim(), appSecret.trim(), shortToken.trim()) },
+                enabled = appId.isNotBlank() && appSecret.isNotBlank() && shortToken.isNotBlank()
+            ) { Text("Connect") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+// ── TikTok connect dialog ──────────────────────────────────────────────────
+
+@Composable
+private fun TikTokConnectDialog(
+    onDismiss: () -> Unit,
+    onConnect: (clientKey: String, clientSecret: String, authCode: String, redirectUri: String) -> Unit
+) {
+    var clientKey    by remember { mutableStateOf("") }
+    var clientSecret by remember { mutableStateOf("") }
+    var authCode     by remember { mutableStateOf("") }
+    var redirectUri  by remember { mutableStateOf("https://your-redirect-uri.com/callback") }
+    var showSecret   by remember { mutableStateOf(false) }
+    var showWebView  by remember { mutableStateOf(false) }
+
+    if (showWebView && clientKey.isNotBlank() && redirectUri.isNotBlank()) {
+        val authUrl = TikTokUploadManager.buildAuthUrl(clientKey.trim(), redirectUri.trim())
+        TikTokOAuthWebView(
+            url = authUrl,
+            redirectUri = redirectUri.trim(),
+            onCodeReceived = { code ->
+                authCode = code
+                showWebView = false
+            },
+            onDismiss = { showWebView = false }
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect TikTok", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "1. Go to developers.tiktok.com\n" +
+                    "2. Create an app & add Content Posting API\n" +
+                    "3. Request scope: video.upload\n" +
+                    "4. Enter your Client Key, Secret & redirect URI\n" +
+                    "5. Tap 'Open TikTok Login' to authorise",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = clientKey, onValueChange = { clientKey = it },
+                    label = { Text("Client Key") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                OutlinedTextField(
+                    value = clientSecret, onValueChange = { clientSecret = it },
+                    label = { Text("Client Secret") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    visualTransformation = if (showSecret) VisualTransformation.None
+                                           else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { showSecret = !showSecret }) {
+                            Text(if (showSecret) "Hide" else "Show", fontSize = 11.sp)
+                        }
+                    }
+                )
+                OutlinedTextField(
+                    value = redirectUri, onValueChange = { redirectUri = it },
+                    label = { Text("Redirect URI") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+
+                if (authCode.isNotBlank()) {
+                    Surface(
+                        color = Color(0xFF4CAF50).copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Check, null,
+                                tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+                            Text("Auth code received ✓",
+                                color = Color(0xFF4CAF50),
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = { showWebView = true },
+                        enabled = clientKey.isNotBlank() && redirectUri.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = TikTokBlack)
+                    ) { Text("Open TikTok Login", color = Color.White) }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConnect(clientKey.trim(), clientSecret.trim(), authCode.trim(), redirectUri.trim()) },
+                enabled = clientKey.isNotBlank() && clientSecret.isNotBlank() && authCode.isNotBlank()
+            ) { Text("Connect") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+// ── TikTok OAuth WebView ───────────────────────────────────────────────────
+
+@Composable
+fun TikTokOAuthWebView(
+    url: String,
+    redirectUri: String,
+    onCodeReceived: (code: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("TikTok Login", fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, "Close")
+                    }
+                }
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView, request: WebResourceRequest
+                                ): Boolean {
+                                    val uri = request.url.toString()
+                                    if (uri.startsWith(redirectUri)) {
+                                        val code = request.url.getQueryParameter("code") ?: ""
+                                        if (code.isNotBlank()) onCodeReceived(code)
+                                        else onDismiss()
+                                        return true
+                                    }
+                                    return false
+                                }
+                            }
+                            loadUrl(url)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+// ── TimePickerDialog ───────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerDialog(
+    title: String = "Select Time",
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable (() -> Unit)? = null,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
+    content: @Composable () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .width(IntrinsicSize.Min)
+                .height(IntrinsicSize.Min)
+                .background(shape = MaterialTheme.shapes.extraLarge, color = containerColor),
+            color = containerColor
+        ) {
+            Column(
+                Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+            Text(
+    text = title,
+    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+    style = MaterialTheme.typography.labelMedium
+)
+                content()
+                Row(Modifier.height(40.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End) {
+                    dismissButton?.invoke()
+                    confirmButton()
+                }
+            }
+        }
+    }
+}
+
+// ── Reusable composables ───────────────────────────────────────────────────
+
+@Composable
+private fun SliderSetting(
+    label: String, value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int, onValueChange: (Float) -> Unit
+) {
+    Column {
+        Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(value.toInt().toString(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        }
+        Slider(value = value, onValueChange = onValueChange,
+            valueRange = valueRange, steps = steps,
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.primaryContainer
+            ))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DropdownSetting(
+    label: String, selectedOption: String,
+    options: List<String>, onOptionSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column {
+        Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+            OutlinedTextField(
+                value = selectedOption, onValueChange = {}, readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option ->
+                    DropdownMenuItem(text = { Text(option) },
+                        onClick = { onOptionSelected(option); expanded = false })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToggleSetting(
+    label: String, subLabel: String,
+    checked: Boolean, onCheckedChange: (Boolean) -> Unit
+) {
+    Row(Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(subLabel, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary
+            ))
+    }
+}

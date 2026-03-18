@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ShortsForge" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+    <style name="Theme.SplashScreen.ShortsForge" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0D0D0D</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.ShortsForge</item>
+    </style>
+</resources>
