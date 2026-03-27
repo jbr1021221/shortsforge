@@ -8,9 +8,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.jbr.shortsforge.ui.screens.EditorScreen
 import com.jbr.shortsforge.ui.screens.HomeScreen
+import com.jbr.shortsforge.ui.screens.MoodSetupScreen
 import com.jbr.shortsforge.ui.screens.PreviewScreen
 import com.jbr.shortsforge.ui.screens.SettingsScreen
 import com.jbr.shortsforge.ui.screens.DashboardScreen
+import com.jbr.shortsforge.ui.screens.HistoryScreen
 import com.jbr.shortsforge.ui.screens.ProfilesScreen
 import com.jbr.shortsforge.ui.export.ExportScreen
 import com.jbr.shortsforge.data.model.MusicSettings
@@ -26,9 +28,11 @@ fun ShortsForgeNavGraph(navController: NavHostController) {
     ) {
         composable(route = Screen.Home.route) {
             HomeScreen(
-                onSettingsClick = { navController.navigate(Screen.Settings.route) },
-                onDashboardClick = { navController.navigate("dashboard") },
-                onProfilesClick = { navController.navigate("profiles") },  // NEW
+                onSettingsClick   = { navController.navigate(Screen.Settings.route) },
+                onDashboardClick  = { navController.navigate("dashboard") },
+                onHistoryClick    = { navController.navigate("history") },
+                onProfilesClick   = { navController.navigate("profiles") },
+                onMoodSetupClick  = { navController.navigate("mood_setup") },
                 onNavigateToEditor = { slides ->
                     navController.currentBackStackEntry?.savedStateHandle?.set("slides", slides)
                     navController.navigate(Screen.Editor.route)
@@ -110,6 +114,18 @@ fun ShortsForgeNavGraph(navController: NavHostController) {
 
         composable(route = "profiles") {          // NEW
             ProfilesScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(route = "mood_setup") {
+            MoodSetupScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(route = "history") {
+            HistoryScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

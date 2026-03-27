@@ -92,7 +92,7 @@ fun PreviewScreen(
         uploadJob = scope.launch {
             YouTubeUploadManager.uploadVideo(
                 context = context,
-                account = account,
+                email = account.email ?: "",
                 videoFile = File(videoPath ?: ""),
                 title = uploadTitle.value,
                 description = uploadDescription.value,

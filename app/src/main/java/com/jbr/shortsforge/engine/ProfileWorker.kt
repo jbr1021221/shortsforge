@@ -56,6 +56,9 @@ class ProfileWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        val nowFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        Log.d(TAG, "=== ProfileWorker STARTED at $nowFmt (tags: $tags) ===")
+
         if (profileId == -1L) {
             Log.e(TAG, "No profile ID in input data")
             return Result.failure()
@@ -76,17 +79,23 @@ class ProfileWorker @AssistedInject constructor(
         }
 
         try {
-            // 1. YouTube account
-            val account = GoogleAuthManager.getAccount(applicationContext)
-            if (account == null || account.email != profile.ytAccountEmail) {
-                showResultNotification(
-                    profileId, profile.name,
-                    "❌ Upload Failed", "YouTube account not connected for ${profile.name}"
-                )
-                return Result.failure()
+            // 1. YouTube check — get email from profile, with self-healing fallback
+            var skipYouTube = false
+            var ytEmail = profile.ytAccountEmail
+            if (ytEmail.isBlank()) {
+                val fallback = GoogleAuthManager.getAccount(applicationContext)
+                if (fallback?.email != null) {
+                    ytEmail = fallback.email!!
+                    // Save it so next scheduled run works without sign-in
+                    profileRepository.updateYouTube(profile.id, ytEmail, fallback.displayName ?: "")
+                    Log.d(TAG, "[${profile.name}] Fallback email found: $ytEmail")
+                } else {
+                    Log.w(TAG, "[${profile.name}] No YouTube email linked. Checking social platforms...")
+                    skipYouTube = true
+                }
             }
 
-            // 2. Folder
+            // 2. Folder check
             if (profile.folderUri.isBlank()) {
                 showResultNotification(profileId, profile.name,
                     "❌ Upload Failed", "No folder selected for ${profile.name}")
@@ -102,7 +111,15 @@ class ProfileWorker @AssistedInject constructor(
                 return Result.failure()
             }
 
-            // 4. Generate slides using profile-specific settings
+            // 4. Platform check - if neither YT nor Socials are connected, fail
+            val anySocial = profile.isFacebookConnected || profile.isInstagramConnected || profile.isTikTokConnected
+            if (skipYouTube && !anySocial) {
+                showResultNotification(profileId, profile.name,
+                    "❌ Upload Failed", "No YouTube or Social accounts linked for ${profile.name}")
+                return Result.failure()
+            }
+
+            // 5. Generate slides using profile-specific settings
             updateForeground(profileId, "Generating slides for ${profile.name}...")
             val slides = autoGenerateEngine.generateShortForProfile(images, profile)
             if (slides.isEmpty()) {
@@ -111,7 +128,7 @@ class ProfileWorker @AssistedInject constructor(
                 return Result.failure()
             }
 
-            // 5. Music — random track + random start
+            // 6. Music — random track + random start
             val availableMusic = musicManager.scanMusicFolder(folderUri)
             val musicSettings = if (availableMusic.isNotEmpty()) {
                 val randomMusic = availableMusic.random()
@@ -127,19 +144,21 @@ class ProfileWorker @AssistedInject constructor(
                 )
             } else MusicSettings(isMusicEnabled = false)
 
-            // 6. Export
+            // 7. Export
             updateForeground(profileId, "Exporting video for ${profile.name}...")
             val exportResult = videoExporter.exportVideoSuspend(
                 slides = slides,
                 musicSettings = musicSettings,
-                onProgress = {}
+                onProgress = { progress ->
+                    updateForeground(profileId, "Exporting video for ${profile.name}: ${progress}%")
+                }
             ) ?: run {
                 showResultNotification(profileId, profile.name,
                     "❌ Upload Failed", "Export failed for ${profile.name}")
                 return Result.failure()
             }
 
-            // 7. Title
+            // 8. Title
             val videoTitle = profile.autoUploadTitle
                 .trim()
                 .ifBlank {
@@ -147,64 +166,70 @@ class ProfileWorker @AssistedInject constructor(
                 }
                 .take(100)
 
-            // 8. YouTube upload
-            updateForeground(profileId, "Uploading to YouTube: ${profile.name}...")
+            // 9. YouTube upload
             var youtubeSuccess = false
             var uploadedVideoId: String? = null
+            var transientError = false
             val uploadHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
 
-            YouTubeUploadManager.uploadVideo(
-                context = applicationContext,
-                account = account,
-                videoFile = exportResult,
-                title = videoTitle,
-                description = "#Shorts #ShortsForge",
-                privacyStatus = "Public",
-                onProgress = {},
-                onSuccess = { id -> youtubeSuccess = true; uploadedVideoId = id },
-                onError = { err -> Log.e(TAG, "YT error [${profile.name}]: $err") }
-            )
-
-            // 9. Social platforms (with TikTok Token Refresh)
-            var tiktokToken = profile.tiktokAccessToken
-            var tiktokRefresh = profile.tiktokRefreshToken
-            var tiktokExpiry = profile.tiktokTokenExpiry
-
-            if (profile.isTikTokConnected && (tiktokExpiry < System.currentTimeMillis() + 600_000)) {
-                Log.d(TAG, "Refreshing TikTok token for ${profile.name} (expiry: $tiktokExpiry)...")
-                val newToken = TikTokUploadManager.refreshAccessToken(
-                    tiktokRefresh, profile.tiktokClientKey, profile.tiktokClientSecret
+            if (!skipYouTube) {
+                updateForeground(profileId, "Uploading to YouTube: ${profile.name}...")
+                YouTubeUploadManager.uploadVideo(
+                    context = applicationContext,
+                    email = ytEmail,
+                    videoFile = exportResult,
+                    title = videoTitle,
+                    description = "#Shorts #ShortsForge",
+                    privacyStatus = "Public",
+                    onProgress = { progress ->
+                        updateForeground(profileId, "Uploading to YouTube: ${profile.name} (${progress}%)")
+                    },
+                    onSuccess = { id -> youtubeSuccess = true; uploadedVideoId = id },
+                    onError = { err ->
+                        Log.e(TAG, "YT error [${profile.name}]: $err")
+                        if (err.contains("Check connection", true) || err.contains("timeout", true)) {
+                            transientError = true
+                        }
+                    }
                 )
-                if (newToken != null) {
-                    tiktokToken = newToken.accessToken
-                    tiktokRefresh = newToken.refreshToken
-                    tiktokExpiry = System.currentTimeMillis() + (newToken.expiresIn * 1000)
-                    profileRepository.updateTikTok(
-                        profileId, tiktokToken, tiktokRefresh, tiktokExpiry,
-                        newToken.openId, profile.tiktokClientKey, profile.tiktokClientSecret
-                    )
-                    Log.d(TAG, "TikTok token refreshed successfully")
-                } else {
-                    Log.e(TAG, "TikTok token refresh FAILED")
-                }
             }
 
-            val creds = PlatformCredentials(
-                fbAccessToken      = profile.fbAccessToken,
-                fbPageId           = profile.fbPageId,
-                fbPageAccessToken  = profile.fbPageAccessToken,
-                igUserId           = profile.igUserId,
-                tiktokAccessToken  = tiktokToken,
-                tiktokOpenId       = profile.tiktokOpenId,
-                tiktokClientKey    = profile.tiktokClientKey,
-                tiktokClientSecret = profile.tiktokClientSecret
-            )
+            // 10. Social platforms (with TikTok Token Refresh)
+            var socialResults = emptyList<MultiPlatformUploadManager.UploadResult>()
+            if (anySocial) {
+                var tiktokToken = profile.tiktokAccessToken
+                var tiktokRefresh = profile.tiktokRefreshToken
+                var tiktokExpiry = profile.tiktokTokenExpiry
 
-            val anyPlatform = creds.isFacebookConnected ||
-                    creds.isInstagramConnected || creds.isTikTokConnected
-            if (anyPlatform) {
+                if (profile.isTikTokConnected && (tiktokExpiry < System.currentTimeMillis() + 600_000)) {
+                    Log.d(TAG, "Refreshing TikTok token for ${profile.name}...")
+                    val newToken = TikTokUploadManager.refreshAccessToken(
+                        tiktokRefresh, profile.tiktokClientKey, profile.tiktokClientSecret
+                    )
+                    if (newToken != null) {
+                        tiktokToken = newToken.accessToken
+                        tiktokRefresh = newToken.refreshToken
+                        tiktokExpiry = System.currentTimeMillis() + (newToken.expiresIn * 1000)
+                        profileRepository.updateTikTok(
+                            profileId, tiktokToken, tiktokRefresh, tiktokExpiry,
+                            newToken.openId, profile.tiktokClientKey, profile.tiktokClientSecret
+                        )
+                    }
+                }
+
+                val creds = PlatformCredentials(
+                    fbAccessToken      = profile.fbAccessToken,
+                    fbPageId           = profile.fbPageId,
+                    fbPageAccessToken  = profile.fbPageAccessToken,
+                    igUserId           = profile.igUserId,
+                    tiktokAccessToken  = tiktokToken,
+                    tiktokOpenId       = profile.tiktokOpenId,
+                    tiktokClientKey    = profile.tiktokClientKey,
+                    tiktokClientSecret = profile.tiktokClientSecret
+                )
+
                 updateForeground(profileId, "Uploading to social platforms: ${profile.name}...")
-                MultiPlatformUploadManager.uploadToAll(
+                socialResults = MultiPlatformUploadManager.uploadToAll(
                     context = applicationContext,
                     credentials = creds,
                     videoFile = exportResult,
@@ -212,18 +237,41 @@ class ProfileWorker @AssistedInject constructor(
                 )
             }
 
-            // 10. Cleanup
+            // 11. Record history (Capture YouTube + Social results)
+            recordUploadHistory(videoTitle, youtubeSuccess, socialResults)
+
+            // 12. Cleanup
             if (exportResult.exists()) exportResult.delete()
 
-            return if (youtubeSuccess) {
-                uploadedVideoId?.let { videoStatsRepository.saveUploadedVideo(it, uploadHour) }
-                showResultNotification(profileId, profile.name,
-                    "🚀 ${profile.name} Uploaded!", "\"$videoTitle\" is live on YouTube!")
-                Result.success()
-            } else {
-                showResultNotification(profileId, profile.name,
-                    "❌ Upload Failed", "YouTube upload failed for ${profile.name}")
-                Result.failure()
+            // 13. Determine Final Result
+            return when {
+                youtubeSuccess -> {
+                    uploadedVideoId?.let { videoStatsRepository.saveUploadedVideo(it, uploadHour) }
+                    showResultNotification(profileId, profile.name,
+                        "🚀 ${profile.name} Uploaded!", "\"$videoTitle\" is live on YouTube!")
+                    Result.success()
+                }
+                socialResults.any { it.success } -> {
+                    val count = socialResults.count { it.success }
+                    showResultNotification(profileId, profile.name,
+                        "🚀 ${profile.name} Socials Live!", "Video uploaded to $count platforms!")
+                    Result.success()
+                }
+                transientError -> {
+                    showResultNotification(profileId, profile.name,
+                        "⌛ Connection Issue", "Upload delayed, will retry automatically.")
+                    Result.retry()
+                }
+                skipYouTube && anySocial -> {
+                    showResultNotification(profileId, profile.name,
+                        "❌ Social Upload Failed", "Check your social account connections.")
+                    Result.failure()
+                }
+                else -> {
+                    showResultNotification(profileId, profile.name,
+                        "❌ Upload Failed", "YouTube upload failed for ${profile.name}")
+                    Result.failure()
+                }
             }
 
         } catch (e: Exception) {
@@ -231,24 +279,68 @@ class ProfileWorker @AssistedInject constructor(
             showResultNotification(profileId, profile.name,
                 "❌ Error", "Unexpected error for ${profile.name}")
             return Result.failure()
-        } finally {
-            // Reschedule this profile for next run
-            if (!tags.contains("test_profile_$profileId")) {
-                val updatedProfile = profileRepository.getProfileById(profileId)
-                if (updatedProfile != null && updatedProfile.autoUploadEnabled) {
-                    if (updatedProfile.hourlyUploadEnabled) {
-                        val nextHour = (java.util.Calendar.getInstance()
-                            .get(java.util.Calendar.HOUR_OF_DAY) + 1) % 24
-                        ProfileScheduler.scheduleHourly(applicationContext, profileId, nextHour - 1)
-                    } else {
-                        ProfileScheduler.scheduleDaily(
-                            applicationContext, profileId,
-                            updatedProfile.autoUploadHour,
-                            updatedProfile.autoUploadMinute
-                        )
-                    }
+        }
+    }
+
+    private fun recordUploadHistory(
+        videoTitle: String, youtubeSuccess: Boolean,
+        socialResults: List<MultiPlatformUploadManager.UploadResult>
+    ) {
+        try {
+            val now = System.currentTimeMillis()
+            val prefs = applicationContext.getSharedPreferences("upload_history", Context.MODE_PRIVATE)
+
+            // ── Build platforms JSON ──────────────────────────────────────────
+            val platformsJson = org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("name", "YouTube")
+                    put("success", youtubeSuccess)
+                })
+                socialResults.forEach { result ->
+                    put(org.json.JSONObject().apply {
+                        put("name", result.platform)
+                        put("success", result.success)
+                    })
                 }
             }
+
+            // ── Save to records_v2 ────────────────────────────────────────────
+            val existing = prefs.getString("records_v2", "[]") ?: "[]"
+            val arr = org.json.JSONArray(existing)
+            arr.put(org.json.JSONObject().apply {
+                put("timestampMs", now)
+                put("videoTitle", videoTitle)
+                put("platforms", platformsJson)
+            })
+
+            // ── Save to legacy records (backward compat) ─────────────────────
+            val dateLabel = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault()).format(java.util.Date(now))
+            val timeLabel = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now))
+            val legacyArr = org.json.JSONArray(prefs.getString("records", "[]") ?: "[]")
+            var found = false
+            for (i in 0 until legacyArr.length()) {
+                val obj = legacyArr.getJSONObject(i)
+                if (obj.getString("dateLabel") == dateLabel) {
+                    obj.put("count", obj.getInt("count") + 1)
+                    obj.put("timeLabel", timeLabel)
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                legacyArr.put(org.json.JSONObject().apply {
+                    put("dateLabel", dateLabel); put("timeLabel", timeLabel); put("count", 1); put("timestampMs", now)
+                })
+            }
+
+            prefs.edit()
+                .putString("records_v2", arr.toString())
+                .putString("records", legacyArr.toString())
+                .apply()
+
+            Log.d(TAG, "Recorded activity: $videoTitle")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to record history", e)
         }
     }
 

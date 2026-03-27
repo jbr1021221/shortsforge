@@ -10,13 +10,13 @@ object ProfileScheduler {
 
     private const val TAG = "ProfileScheduler"
 
-    fun scheduleDaily(context: Context, profileId: Long, hour: Int, minute: Int, policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE) {
-        scheduleAt(context, profileId, hour, minute, policy)
+    fun scheduleDaily(context: Context, profileId: Long, hour: Int, minute: Int, policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.REPLACE) {
+        scheduleAt(context, profileId, hour, minute, 24, TimeUnit.HOURS, policy)
     }
 
-    fun scheduleHourly(context: Context, profileId: Long, startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY), policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE) {
+    fun scheduleHourly(context: Context, profileId: Long, startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY), policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.REPLACE) {
         val nextHour = (startHour + 1) % 24
-        scheduleAt(context, profileId, nextHour, 0, policy)
+        scheduleAt(context, profileId, nextHour, 0, 1, TimeUnit.HOURS, policy)
         Log.d(TAG, "Profile $profileId hourly: next at $nextHour:00")
     }
 
@@ -40,7 +40,15 @@ object ProfileScheduler {
         Log.d(TAG, "Test run triggered for profile $profileId")
     }
 
-    private fun scheduleAt(context: Context, profileId: Long, hour: Int, minute: Int, policy: ExistingWorkPolicy) {
+    private fun scheduleAt(
+        context: Context,
+        profileId: Long,
+        hour: Int,
+        minute: Int,
+        interval: Long,
+        timeUnit: TimeUnit,
+        policy: ExistingPeriodicWorkPolicy
+    ) {
         val now = Calendar.getInstance()
         val target = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
@@ -48,15 +56,20 @@ object ProfileScheduler {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        if (target.timeInMillis <= now.timeInMillis) {
-            target.add(Calendar.DAY_OF_YEAR, 1)
+        val diff = now.timeInMillis - target.timeInMillis
+        if (diff > 0) {
+            // If the scheduled time was more than 30 minutes ago, move to tomorrow.
+            // Otherwise, keep it for today (resulting in a 0 delay) so it fires immediately.
+            if (diff > 30 * 60 * 1000) {
+                target.add(Calendar.DAY_OF_YEAR, 1)
+            }
         }
-        val delay = target.timeInMillis - System.currentTimeMillis()
+        val delay = (target.timeInMillis - System.currentTimeMillis()).coerceAtLeast(0)
 
         Log.d(TAG, "Profile $profileId scheduled at ${String.format("%02d:%02d", hour, minute)} " +
-                "(delay ${delay / 60000} min)")
+                "(delay ${delay / 60000} min, interval $interval ${timeUnit.name})")
 
-        val request = OneTimeWorkRequestBuilder<ProfileWorker>()
+        val request = PeriodicWorkRequestBuilder<ProfileWorker>(interval, timeUnit)
             .setInitialDelay(delay, TimeUnit.MILLISECONDS)
             .setInputData(workDataOf(ProfileWorker.KEY_PROFILE_ID to profileId))
             .setConstraints(
@@ -70,7 +83,7 @@ object ProfileScheduler {
                 WorkRequest.MIN_BACKOFF_MILLIS, TimeUnit.MILLISECONDS)
             .build()
 
-        WorkManager.getInstance(context).enqueueUniqueWork(
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             workName(profileId),
             policy,
             request

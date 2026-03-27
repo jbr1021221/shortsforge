@@ -48,5 +48,8 @@ object AppModule {
     fun provideProjectImageDao(database: AppDatabase) = database.projectImageDao()
 
     @Provides
-    fun provideProfileDao(database: AppDatabase) = database.profileDao()  // NEW
+    fun provideProfileDao(database: AppDatabase) = database.profileDao()
+
+    @Provides
+    fun provideMoodConfigDao(database: AppDatabase) = database.moodConfigDao()
 }

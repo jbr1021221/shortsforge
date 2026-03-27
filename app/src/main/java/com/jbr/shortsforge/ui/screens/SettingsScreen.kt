@@ -38,6 +38,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jbr.shortsforge.engine.*
 import com.jbr.shortsforge.ui.settings.SettingsViewModel
 import kotlinx.coroutines.launch
+import android.content.Intent
+import androidx.compose.material.icons.filled.*
 
 private val FacebookBlue  = Color(0xFF1877F2)
 private val InstagramPink = Color(0xFFE1306C)
@@ -78,13 +80,27 @@ fun SettingsScreen(
         }
     }
 
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            viewModel.updateFolder(it.toString())
+            scope.launch { snackbarHostState.showSnackbar("Media folder updated for ${activeProfile?.name}!") }
+        }
+    }
+
     val youtubeSignInLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val signedIn = GoogleAuthManager.handleSignInResult(result.data)
         account = signedIn
         if (signedIn != null) {
-            viewModel.linkYouTubeToActiveProfile(signedIn.email ?: "", signedIn.displayName ?: "")
+            val email = signedIn.email ?: ""
+            viewModel.linkYouTubeToActiveProfile(email, signedIn.displayName ?: "")
+            viewModel.saveYtAccountEmail(email)   // persist for background AutoUploadWorker
             scope.launch { snackbarHostState.showSnackbar("YouTube connected to ${activeProfile?.name}!") }
         } else {
             scope.launch { snackbarHostState.showSnackbar("Failed to connect to YouTube") }
@@ -137,6 +153,46 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onErrorContainer)
                     }
                 }
+            }
+
+            // ── Media Folder (per active profile) ────────────────────────
+            if (activeProfile != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ProfileSectionHeader("Media Folder", activeProfile?.name)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        tonalElevation = 2.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(
+                                Modifier.size(42.dp).clip(CircleShape).background(Color(0xFF2E7D32).copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Folder, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(24.dp))
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text("Current Folder", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (activeProfile?.folderUri != null) "Folder is set" else "No folder selected",
+                                    color = if (activeProfile?.folderUri != null) Color(0xFF2E7D32) else Color.Red,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Button(
+                                onClick = { folderPickerLauncher.launch(null) },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(if (activeProfile?.folderUri != null) "Change" else "Select")
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
 
             // ── Video settings (global) ────────────────────────────────────
@@ -496,7 +552,6 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     viewModel.updateAutoUploadEnabled(true)
                     viewModel.updateAutoUploadTime(state.hour, state.minute)
-                    activeProfile?.let { ProfileScheduler.scheduleDaily(context, it.id, state.hour, state.minute) }
                     showAutoUploadTimePicker = false
                     scope.launch { snackbarHostState.showSnackbar(
                         String.format("Auto-upload scheduled for %02d:%02d for ${activeProfile?.name}!",

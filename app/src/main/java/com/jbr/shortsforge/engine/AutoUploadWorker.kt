@@ -14,7 +14,6 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import androidx.work.ExistingWorkPolicy
 import com.jbr.shortsforge.MainActivity
 import com.jbr.shortsforge.data.model.MusicSettings
 import com.jbr.shortsforge.data.preferences.AppSettingsRepository
@@ -37,7 +36,7 @@ class AutoUploadWorker @AssistedInject constructor(
     private val folderPrefs: FolderPreferencesRepository,
     private val settingsRepository: AppSettingsRepository,
     private val videoStatsRepository: VideoStatsRepository,
-    private val platformCredentialsRepository: PlatformCredentialsRepository  // NEW
+    private val platformCredentialsRepository: PlatformCredentialsRepository
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -55,7 +54,6 @@ class AutoUploadWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         Log.d(TAG, "=== AutoUploadWorker STARTED ===")
-
         createNotificationChannel()
 
         try {
@@ -64,17 +62,33 @@ class AutoUploadWorker @AssistedInject constructor(
             Log.w(TAG, "setForeground warning: ${e.message}")
         }
 
-        try {
-            // 1. Get Google account (YouTube)
-            val account = GoogleAuthManager.getAccount(applicationContext)
-            if (account == null) {
-                showResultNotification("❌ Auto-Upload Failed", "No YouTube account connected.")
-                return Result.failure()
-            }
-
-            // 2. Read settings + platform credentials
+        return try {
+            // 1. Read settings + platform credentials
             val settings = settingsRepository.settingsFlow.first()
             val platformCreds = platformCredentialsRepository.credentialsFlow.first()
+
+            // 2. Resolve YouTube email — saved email is required for background work.
+            //    GoogleAuthManager.getAccount() can return null in background on Android 10+,
+            //    so we always persist the email when the user links their account in the UI.
+            var ytEmail = settings.ytAccountEmail.trim()
+
+            if (ytEmail.isBlank()) {
+                // One-time self-heal fallback for users who linked before email was persisted
+                val fallbackAccount = GoogleAuthManager.getAccount(applicationContext)
+                if (fallbackAccount?.email != null) {
+                    ytEmail = fallbackAccount.email!!
+                    settingsRepository.updateYtAccountEmail(ytEmail)
+                    Log.d(TAG, "Self-heal: saved YT email $ytEmail for future background runs")
+                } else {
+                    showResultNotification(
+                        "❌ Auto-Upload Failed",
+                        "No YouTube account linked. Open the app → Settings → connect YouTube."
+                    )
+                    return Result.failure()
+                }
+            }
+
+            Log.d(TAG, "Using YT email: $ytEmail")
 
             // 3. Get folder and images
             val folderUriString = folderPrefs.folderUriFlow.first() ?: run {
@@ -118,7 +132,7 @@ class AutoUploadWorker @AssistedInject constructor(
             val exportResult = videoExporter.exportVideoSuspend(
                 slides = slides,
                 musicSettings = musicSettings,
-                onProgress = { }
+                onProgress = { progress -> updateForeground("Exporting video: ${progress}%") }
             )
 
             if (exportResult == null) {
@@ -134,7 +148,7 @@ class AutoUploadWorker @AssistedInject constructor(
                 }
                 .take(100)
 
-            Log.d(TAG, "Uploading with title: \"$videoTitle\"")
+            Log.d(TAG, "Video title: \"$videoTitle\"")
 
             // 8. Upload to YouTube
             updateForeground("Uploading to YouTube...")
@@ -145,12 +159,12 @@ class AutoUploadWorker @AssistedInject constructor(
             try {
                 YouTubeUploadManager.uploadVideo(
                     context = applicationContext,
-                    account = account,
+                    email = ytEmail,
                     videoFile = exportResult,
                     title = videoTitle,
                     description = "#Shorts #ShortsForge",
                     privacyStatus = "Public",
-                    onProgress = { },
+                    onProgress = { progress -> updateForeground("Uploading to YouTube: ${progress}%") },
                     onSuccess = { videoId ->
                         youtubeSuccess = true
                         uploadedVideoId = videoId
@@ -166,71 +180,97 @@ class AutoUploadWorker @AssistedInject constructor(
                     platformCreds.isInstagramConnected ||
                     platformCreds.isTikTokConnected
 
-            if (anyPlatformConnected) {
+            val socialResults = if (anyPlatformConnected) {
                 updateForeground("Uploading to social platforms...")
-                val platformResults = MultiPlatformUploadManager.uploadToAll(
+                val results = MultiPlatformUploadManager.uploadToAll(
                     context = applicationContext,
                     credentials = platformCreds,
                     videoFile = exportResult,
                     title = videoTitle
                 )
-                val successCount = platformResults.count { it.success }
-                Log.d(TAG, "Platform results: $successCount/${platformResults.size} succeeded")
-            }
+                val successCount = results.count { it.success }
+                Log.d(TAG, "Platform results: $successCount/${results.size} succeeded")
+                results
+            } else emptyList()
 
             // 10. Clean up temp file
             if (exportResult.exists()) exportResult.delete()
 
-            return if (youtubeSuccess) {
+            if (youtubeSuccess) {
                 uploadedVideoId?.let { videoId ->
                     videoStatsRepository.saveUploadedVideo(videoId, uploadHour)
                 }
-                recordUploadHistory()
+                recordUploadHistory(
+                    videoTitle = videoTitle,
+                    youtubeSuccess = true,
+                    platformResults = socialResults
+                )
                 showResultNotification("🚀 Short Uploaded!", "\"$videoTitle\" is live on YouTube!")
                 Result.success()
             } else {
+                // Still record a failed YouTube attempt so the user can see it in History
+                recordUploadHistory(
+                    videoTitle = videoTitle,
+                    youtubeSuccess = false,
+                    platformResults = socialResults
+                )
                 showResultNotification("❌ YouTube Upload Failed", "Check your internet and try again.")
-                Result.failure()
+                // Return retry so WorkManager attempts again with backoff before next periodic run
+                Result.retry()
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Worker crashed", e)
-            showResultNotification("❌ Auto-Upload Failed", "Unexpected error. Will retry tomorrow.")
-            return Result.failure()
-        } finally {
-            if (!tags.contains("test_auto_upload")) {
-                val settings = settingsRepository.settingsFlow.first()
-                if (settings.hourlyUploadEnabled) {
-                    val nextHour = (java.util.Calendar.getInstance()
-                        .get(java.util.Calendar.HOUR_OF_DAY) + 1) % 24
-                    AutoUploadScheduler.scheduleHourly(applicationContext, nextHour - 1)
-                } else {
-                    AutoUploadScheduler.scheduleDaily(
-                        applicationContext,
-                        settings.autoUploadHour,
-                        settings.autoUploadMinute,
-                        policy = ExistingWorkPolicy.REPLACE
-                    )
-                }
-            }
+            showResultNotification("❌ Auto-Upload Failed", "Unexpected error. Will retry.")
+            Result.retry()  // retry instead of failure so it doesn't silently die
         }
+        // NOTE: No manual rescheduling needed — PeriodicWork handles the 24h cycle automatically.
     }
 
-    private fun recordUploadHistory() {
+    private fun recordUploadHistory(
+        videoTitle: String,
+        youtubeSuccess: Boolean,
+        platformResults: List<MultiPlatformUploadManager.UploadResult>
+    ) {
         try {
             val prefs = applicationContext.getSharedPreferences(
                 "upload_history", Context.MODE_PRIVATE
             )
             val now = System.currentTimeMillis()
+
+            // ── Build platform list ───────────────────────────────────────────
+            val platformsJson = org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("name", "YouTube")
+                    put("success", youtubeSuccess)
+                })
+                platformResults.forEach { result ->
+                    put(org.json.JSONObject().apply {
+                        put("name", result.platform)
+                        put("success", result.success)
+                    })
+                }
+            }
+
+            // ── Append new record to records_v2 ───────────────────────────────
+            val existing = prefs.getString("records_v2", "[]") ?: "[]"
+            val arr = org.json.JSONArray(existing)
+            arr.put(org.json.JSONObject().apply {
+                put("timestampMs", now)
+                put("videoTitle", videoTitle)
+                put("platforms", platformsJson)
+            })
+
+            // ── Also update legacy records for DashboardScreen backward compat ─
             val dateFmt = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
             val timeFmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
             val dateLabel = dateFmt.format(java.util.Date(now))
             val timeLabel = timeFmt.format(java.util.Date(now))
-            val existing = prefs.getString("records", "[]") ?: "[]"
-            val arr = org.json.JSONArray(existing)
+            val legacyRaw = prefs.getString("records", "[]") ?: "[]"
+            val legacyArr = org.json.JSONArray(legacyRaw)
             var found = false
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
+            for (i in 0 until legacyArr.length()) {
+                val obj = legacyArr.getJSONObject(i)
                 if (obj.getString("dateLabel") == dateLabel) {
                     obj.put("count", obj.getInt("count") + 1)
                     obj.put("timeLabel", timeLabel)
@@ -239,14 +279,20 @@ class AutoUploadWorker @AssistedInject constructor(
                 }
             }
             if (!found) {
-                arr.put(org.json.JSONObject().apply {
+                legacyArr.put(org.json.JSONObject().apply {
                     put("dateLabel", dateLabel)
                     put("timeLabel", timeLabel)
                     put("count", 1)
                     put("timestampMs", now)
                 })
             }
-            prefs.edit().putString("records", arr.toString()).apply()
+
+            prefs.edit()
+                .putString("records_v2", arr.toString())
+                .putString("records", legacyArr.toString())
+                .apply()
+
+            Log.d(TAG, "Recorded upload history: $videoTitle | platforms=${platformResults.size + 1}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to record upload history", e)
         }

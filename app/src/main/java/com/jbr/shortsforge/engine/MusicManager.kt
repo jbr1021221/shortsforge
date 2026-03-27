@@ -133,4 +133,46 @@ class MusicManager @Inject constructor(
             false
         }
     }
+
+    /**
+     * Scans the given folder DIRECTLY for audio files (no subfolder lookup).
+     * Used by MoodEngine where the music folder URI points straight to a music folder.
+     */
+    fun scanDirectFolder(folderUri: Uri): List<AudioItem> {
+        val results = mutableListOf<AudioItem>()
+        try {
+            val rootDocId   = DocumentsContract.getTreeDocumentId(folderUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, rootDocId)
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+                ),
+                null, null, null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val docId = cursor.getString(0) ?: continue
+                    val name  = cursor.getString(1) ?: continue
+                    val mime  = cursor.getString(2) ?: continue
+                    val ext   = name.substringAfterLast('.', "").lowercase()
+                    if (mime.startsWith("audio/") || ext in AUDIO_EXTENSIONS) {
+                        val fileUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, docId)
+                        results.add(
+                            AudioItem(
+                                id         = UUID.randomUUID().toString(),
+                                uri        = fileUri.toString(),
+                                fileName   = name,
+                                durationMs = getAudioDuration(fileUri)
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in scanDirectFolder", e)
+        }
+        return results
+    }
 }

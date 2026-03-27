@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.work.ExistingPeriodicWorkPolicy
 import com.jbr.shortsforge.data.repository.ProfileRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,12 @@ class BootReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var profileRepository: ProfileRepository
+
+    @Inject
+    lateinit var moodRepository: com.jbr.shortsforge.data.repository.MoodRepository
+
+    @Inject
+    lateinit var moodScheduler: MoodScheduler
 
     companion object {
         private const val TAG = "BootReceiver"
@@ -41,18 +48,25 @@ class BootReceiver : BroadcastReceiver() {
                         Log.d(TAG, "Rescheduling profile '${profile.name}' " +
                                 "at ${profile.autoUploadHour}:${profile.autoUploadMinute}")
                         if (profile.hourlyUploadEnabled) {
-                            ProfileScheduler.scheduleHourly(context, profile.id)
+                            ProfileScheduler.scheduleHourly(context, profile.id, policy = ExistingPeriodicWorkPolicy.KEEP)
                         } else {
                             ProfileScheduler.scheduleDaily(
                                 context, profile.id,
                                 profile.autoUploadHour,
-                                profile.autoUploadMinute
+                                profile.autoUploadMinute,
+                                policy = ExistingPeriodicWorkPolicy.KEEP
                             )
                         }
                         scheduled++
                     }
                 }
                 Log.d(TAG, "Rescheduled $scheduled / ${profiles.size} profiles")
+
+                // ── Moods ──
+                val moodConfigs = moodRepository.allMoodConfigs.first()
+                moodScheduler.scheduleAllEnabled(context, moodConfigs)
+                Log.d(TAG, "Rescheduled moods")
+
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to reschedule after boot", e)
             }

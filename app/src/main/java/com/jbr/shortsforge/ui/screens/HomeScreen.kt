@@ -3,7 +3,9 @@ package com.jbr.shortsforge.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -56,7 +58,9 @@ fun HomeScreen(
     profileViewModel: ProfileViewModel = hiltViewModel(),
     onSettingsClick: () -> Unit,
     onDashboardClick: () -> Unit,
+    onHistoryClick: () -> Unit = {},
     onProfilesClick: () -> Unit,
+    onMoodSetupClick: () -> Unit = {},
     onNavigateToEditor: (List<SlideItem>) -> Unit
 ) {
     val context = LocalContext.current
@@ -66,6 +70,7 @@ fun HomeScreen(
 
     var showPermissionRationale by remember { mutableStateOf(false) }
     var showProfileSwitcher by remember { mutableStateOf(false) }
+    var showSidebar by remember { mutableStateOf(false) }
 
     val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
         arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
@@ -104,13 +109,14 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(60.dp)
+                            .height(64.dp)
                             .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (uiState.isSelectionMode) {
+                            // ── SELECTION MODE ──
                             IconButton(onClick = { viewModel.toggleSelectionMode() },
-                                modifier = Modifier.size(36.dp)) {
+                                modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.Close, "Exit", tint = Color.White)
                             }
                             Spacer(Modifier.width(8.dp))
@@ -119,7 +125,8 @@ fun HomeScreen(
                                 fontSize = 18.sp, modifier = Modifier.weight(1f))
                             Row(
                                 modifier = Modifier
-                                    .background(Color(0xFF2A2A2A), RoundedCornerShape(20.dp))
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(Color(0xFF2A2A2A))
                                     .padding(horizontal = 4.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -135,138 +142,67 @@ fun HomeScreen(
                                 }
                             }
                         } else {
-                            // Logo badge
+                            // ── NORMAL MODE ──
+                            // Left: Avatar
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .background(Color.Red, RoundedCornerShape(10.dp)),
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(Color(0xFFE53935), Color(0xFFAD1457))
+                                        )
+                                    )
+                                    .clickable { showSidebar = true },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("SF", color = Color.White,
-                                    fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                            }
-                            Spacer(Modifier.width(10.dp))
-
-                            // ── Profile switcher button ────────────────────
-                            ProfileSwitcherButton(
-                                activeProfile = activeProfile,
-                                profileCount = profiles.size,
-                                onClick = {
-                                    if (profiles.size > 1) showProfileSwitcher = true
-                                    else onProfilesClick()
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            // Context icons
-                            if (uiState.images.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.toggleSelectionMode() },
-                                    modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.Default.PhotoLibrary, "Select",
-                                        tint = Color.White, modifier = Modifier.size(20.dp))
-                                }
-                            }
-                            if (uiState.folderUri != null) {
-                                IconButton(onClick = { viewModel.refresh() },
-                                    modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.Default.Refresh, "Rescan",
-                                        tint = Color.White, modifier = Modifier.size(20.dp))
-                                }
+                                Text(
+                                    (activeProfile?.name?.take(1) ?: "S").uppercase(),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 17.sp
+                                )
                             }
 
-                            // ⋮ Menu
-                            var menuExpanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(
-                                    onClick = { menuExpanded = true },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(Color(0xFF2A2A2A), RoundedCornerShape(20.dp))
-                                ) {
-                                    Icon(Icons.Default.MoreVert, "Menu",
-                                        tint = Color.White, modifier = Modifier.size(20.dp))
-                                }
-                                DropdownMenu(
-                                    expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false },
-                                    modifier = Modifier.background(Color(0xFF1E1E1E)).width(200.dp)
-                                ) {
-                                    Text("ShortsForge", color = Color(0xFF666666),
-                                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                                    HorizontalDivider(color = Color(0xFF2A2A2A), thickness = 0.5.dp)
+                            Spacer(Modifier.width(12.dp))
 
-                                    // Profiles item
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                Box(
-                                                    Modifier.size(30.dp)
-                                                        .background(Color(0xFF3A1A1A), CircleShape),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(Icons.Default.AccountCircle, null,
-                                                        tint = Color.Red, modifier = Modifier.size(16.dp))
-                                                }
-                                                Column {
-                                                    Text("Profiles", color = Color.White,
-                                                        fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                                    Text("Manage channels", color = Color(0xFF888888),
-                                                        fontSize = 11.sp)
-                                                }
-                                            }
-                                        },
-                                        onClick = { menuExpanded = false; onProfilesClick() }
-                                    )
+                            // Center: App Title & Profile
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "ShortsForge",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 18.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    activeProfile?.name ?: "No profile",
+                                    color = Color(0xFF888888),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
 
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                Box(
-                                                    Modifier.size(30.dp)
-                                                        .background(Color(0xFF1A3A2A), CircleShape),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(Icons.Default.BarChart, null,
-                                                        tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
-                                                }
-                                                Column {
-                                                    Text("Analytics", color = Color.White,
-                                                        fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                                    Text("Views & performance", color = Color(0xFF888888), fontSize = 11.sp)
-                                                }
-                                            }
-                                        },
-                                        onClick = { menuExpanded = false; onDashboardClick() }
-                                    )
-
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                Box(
-                                                    Modifier.size(30.dp)
-                                                        .background(Color(0xFF1A1A3A), CircleShape),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(Icons.Default.Settings, null,
-                                                        tint = Color(0xFF2196F3), modifier = Modifier.size(16.dp))
-                                                }
-                                                Column {
-                                                    Text("Settings", color = Color.White,
-                                                        fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                                    Text("App preferences", color = Color(0xFF888888), fontSize = 11.sp)
-                                                }
-                                            }
-                                        },
-                                        onClick = { menuExpanded = false; onSettingsClick() }
-                                    )
-                                }
+                            // Right side: Settings ONLY (as requested)
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1E1E1E))
+                                    .clickable { onSettingsClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Settings, "Settings",
+                                    tint = Color(0xFF2196F3),
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
+                    // Red gradient underline
                     Box(
                         modifier = Modifier.fillMaxWidth().height(2.dp)
                             .background(Brush.horizontalGradient(
@@ -298,10 +234,8 @@ fun HomeScreen(
             }
         ) { paddingValues ->
             Column(Modifier.fillMaxSize().padding(paddingValues)) {
-                if (!uiState.isSelectionMode) {
-                    FolderBar(hasFolder = uiState.folderUri != null,
-                        onPickFolder = { folderPickerLauncher.launch(null) })
-                }
+                // Folder details removed from here as they are now in the top header
+
 
                 if (uiState.projects.isNotEmpty() && !uiState.isSelectionMode) {
                     RecentProjectsSection(projects = uiState.projects)
@@ -361,25 +295,25 @@ fun HomeScreen(
                 }
             }
         }
-    }
 
-    // ── Profile switcher dropdown ──────────────────────────────────────────
-    if (showProfileSwitcher) {
-        ProfileSwitcherSheet(
-            profiles = profiles,
-            activeProfileId = activeProfile?.id,
-            onSelectProfile = { profileId ->
+        // ── LEFT SIDEBAR DRAWER ──────────────────────────────────────────────
+        SidebarDrawer(
+            visible      = showSidebar,
+            activeProfile= activeProfile,
+            profiles     = profiles,
+            onDismiss    = { showSidebar = false },
+            onProfiles = onProfilesClick,
+            onMoodVideos = onMoodSetupClick,
+            onHistory = onHistoryClick,
+            onAnalytics = onDashboardClick,
+            onSwitchProfile = { profileId ->
                 profileViewModel.setActiveProfile(profileId)
-                showProfileSwitcher = false
-            },
-            onManageProfiles = {
-                showProfileSwitcher = false
-                onProfilesClick()
-            },
-            onDismiss = { showProfileSwitcher = false }
+                showSidebar = false
+            }
         )
     }
 
+    // ── Permission rationale dialog ────────────────────────────────────────
     if (showPermissionRationale) {
         AlertDialog(
             onDismissRequest = {},
@@ -403,125 +337,302 @@ fun HomeScreen(
     }
 }
 
-// ── Profile switcher button (in header) ───────────────────────────────────
+// ── SIDEBAR DRAWER ────────────────────────────────────────────────────────────
 
 @Composable
-private fun ProfileSwitcherButton(
-    activeProfile: ProfileEntity?,
-    profileCount: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+private fun SidebarDrawer(
+    visible: Boolean,
+    activeProfile: com.jbr.shortsforge.data.model.ProfileEntity?,
+    profiles: List<com.jbr.shortsforge.data.model.ProfileEntity>,
+    onDismiss: () -> Unit,
+    onProfiles: () -> Unit,
+    onMoodVideos: () -> Unit,
+    onHistory: () -> Unit,
+    onAnalytics: () -> Unit,
+    onSwitchProfile: (Long) -> Unit
 ) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .background(Color(0xFF2A2A2A), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    // Scrim
+    AnimatedVisibility(
+        visible = visible,
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(250)),
+        exit  = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200))
     ) {
-        // Avatar circle
         Box(
-            Modifier.size(22.dp).clip(CircleShape).background(Color.Red),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                (activeProfile?.name?.take(1) ?: "?").uppercase(),
-                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp
-            )
-        }
-        Text(
-            activeProfile?.name ?: "No Profile",
-            color = Color.White, fontWeight = FontWeight.Medium,
-            fontSize = 14.sp, maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.55f))
+                .clickable(onClick = onDismiss)
         )
-        if (profileCount > 1) {
-            Icon(Icons.Default.UnfoldMore, "Switch",
-                tint = Color.Gray, modifier = Modifier.size(16.dp))
-        }
     }
-}
 
-// ── Profile switcher bottom sheet ─────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ProfileSwitcherSheet(
-    profiles: List<ProfileEntity>,
-    activeProfileId: Long?,
-    onSelectProfile: (Long) -> Unit,
-    onManageProfiles: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Switch Profile", style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-
-            profiles.forEach { profile ->
-                val isActive = profile.id == activeProfileId
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    tonalElevation = if (isActive) 4.dp else 1.dp,
+    // Panel
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(
+            animationSpec = androidx.compose.animation.core.spring(
+                dampingRatio = 0.8f, stiffness = 400f
+            )
+        ) { -it },
+        exit = slideOutHorizontally(
+            animationSpec = androidx.compose.animation.core.tween(200)
+        ) { -it }
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(300.dp)
+                    .background(Color(0xFF131313))
+                    .systemBarsPadding()
+            ) {
+                // ── Header ──────────────────────────────────────────────────
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(
-                            if (isActive) 2.dp else 0.dp,
-                            if (isActive) Color.Red else Color.Transparent,
-                            RoundedCornerShape(12.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0xFF1C0A0A), Color(0xFF131313))
+                            )
                         )
-                        .clickable { onSelectProfile(profile.id) }
+                        .padding(24.dp)
                 ) {
-                    Row(
-                        Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Avatar
                         Box(
-                            Modifier.size(40.dp).clip(CircleShape)
-                                .background(if (isActive) Color.Red else Color(0xFF2A2A2A)),
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFFE53935), Color(0xFFAD1457))
+                                    )
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(profile.name.take(1).uppercase(),
-                                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(profile.name, fontWeight = FontWeight.SemiBold)
                             Text(
-                                if (profile.isYouTubeConnected) profile.ytAccountEmail
-                                else "No YouTube account",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                (activeProfile?.name?.take(1) ?: "S").uppercase(),
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 28.sp
                             )
                         }
-                        if (isActive) {
-                            Icon(Icons.Default.Check, "Active",
-                                tint = Color.Red, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text(
+                                activeProfile?.name ?: "No Profile",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                            if (activeProfile?.ytAccountEmail?.isNotBlank() == true) {
+                                Text(
+                                    activeProfile.ytAccountEmail,
+                                    color = Color(0xFF888888),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            // Connected badge
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (activeProfile?.isYouTubeConnected == true) {
+                                    PlatformBadge("▶", Color(0xFFFF0000), "YouTube")
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onManageProfiles,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Settings, null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Manage Profiles")
+                HorizontalDivider(color = Color(0xFF222222), thickness = 0.5.dp)
+
+                // ── Profile switcher list ────────────────────────────────────
+                if (profiles.size > 1) {
+                    Text(
+                        "SWITCH PROFILE",
+                        color = Color(0xFF555555),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp)
+                    )
+                    profiles.take(3).forEach { profile ->
+                        val isActive = profile.id == activeProfile?.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSwitchProfile(profile.id) }
+                                .background(
+                                    if (isActive) Color(0xFF1F1212) else Color.Transparent
+                                )
+                                .padding(horizontal = 20.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.size(34.dp).clip(CircleShape)
+                                    .background(if (isActive) Color(0xFFE53935) else Color(0xFF2A2A2A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    profile.name.take(1).uppercase(),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                            Text(
+                                profile.name,
+                                color = if (isActive) Color.White else Color(0xFFBBBBBB),
+                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = 14.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isActive) {
+                                Icon(Icons.Default.Check, null,
+                                    tint = Color(0xFFE53935), modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = Color(0xFF222222), thickness = 0.5.dp,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+
+                // ── Nav items ────────────────────────────────────────────────
+                Text(
+                    "TOOLS",
+                    color = Color(0xFF555555),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp)
+                )
+
+                SidebarItem(
+                    icon = Icons.Default.History,
+                    iconBg = Color(0xFF2E1C0A),
+                    iconTint = Color(0xFFFF9800),
+                    label = "Activity History",
+                    subtitle = "View upload records",
+                    onClick = {
+                        onDismiss()
+                        onHistory()
+                    }
+                )
+                SidebarItem(
+                    icon = Icons.Default.BarChart,
+                    iconBg = Color(0xFF0A2E1C),
+                    iconTint = Color(0xFF4CAF50),
+                    label = "Analytics Dashboard",
+                    subtitle = "Stats and insights",
+                    onClick = {
+                        onDismiss()
+                        onAnalytics()
+                    }
+                )
+
+                SidebarItem(
+                    icon = Icons.Default.AccountCircle,
+                    iconBg = Color(0xFF2A1A1A),
+                    iconTint = Color(0xFFFF5252),
+                    label = "Manage Profiles",
+                    subtitle = "Add or edit channels",
+                    onClick = {
+                        onDismiss()
+                        onProfiles()
+                    }
+                )
+                SidebarItem(
+                    icon = Icons.Default.AutoAwesome,
+                    iconBg = Color(0xFF1A1D2E),
+                    iconTint = Color(0xFF64B5F6),
+                    label = "Mood Videos",
+                    subtitle = "Daily themed automation",
+                    onClick = {
+                        onDismiss()
+                        onMoodVideos()
+                    }
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                // ── Footer ───────────────────────────────────────────────────
+                HorizontalDivider(color = Color(0xFF222222), thickness = 0.5.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        Modifier.size(28.dp).background(Color.Red, RoundedCornerShape(7.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("SF", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp)
+                    }
+                    Column {
+                        Text("ShortsForge", color = Color(0xFF666666), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Auto-upload engine", color = Color(0xFF444444), fontSize = 10.sp)
+                    }
+                }
             }
         }
     }
 }
 
-// ── Sub-composables (unchanged from original) ──────────────────────────────
+@Composable
+private fun PlatformBadge(emoji: String, color: Color, name: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(emoji, fontSize = 10.sp)
+        Text(name, color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun SidebarItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconBg: Color,
+    iconTint: Color,
+    label: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(iconBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = Color(0xFF666666), fontSize = 11.sp)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF444444), modifier = Modifier.size(16.dp))
+    }
+}
+
+// ── Sub-composables ────────────────────────────────────────────────────────
+
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable

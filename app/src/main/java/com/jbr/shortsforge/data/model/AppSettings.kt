@@ -16,5 +16,6 @@ data class AppSettings(
     val autoUploadHour: Int = 10,
     val autoUploadMinute: Int = 0,
     val hourlyUploadEnabled: Boolean = false,
-    val autoUploadTitle: String = ""
+    val autoUploadTitle: String = "",
+    val ytAccountEmail: String = ""   // saved so background worker doesn't need live GoogleSignIn
 )

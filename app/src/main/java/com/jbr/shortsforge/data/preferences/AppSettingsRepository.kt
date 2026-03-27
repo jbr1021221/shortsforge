@@ -33,6 +33,7 @@ class AppSettingsRepository @Inject constructor(
         val AUTO_UPLOAD_MINUTE = intPreferencesKey("auto_upload_minute")
         val AUTO_UPLOAD_TITLE = stringPreferencesKey("auto_upload_title")
         val HOURLY_UPLOAD_ENABLED = booleanPreferencesKey("hourly_upload_enabled")
+        val YT_ACCOUNT_EMAIL = stringPreferencesKey("yt_account_email")
     }
 
     val settingsFlow: Flow<AppSettings> = dataStore.data.map { prefs ->
@@ -52,7 +53,8 @@ class AppSettingsRepository @Inject constructor(
             autoUploadHour = prefs[Keys.AUTO_UPLOAD_HOUR] ?: 10,
             autoUploadMinute = prefs[Keys.AUTO_UPLOAD_MINUTE] ?: 0,
             autoUploadTitle = prefs[Keys.AUTO_UPLOAD_TITLE] ?: "",
-            hourlyUploadEnabled = prefs[Keys.HOURLY_UPLOAD_ENABLED] ?: false
+            hourlyUploadEnabled = prefs[Keys.HOURLY_UPLOAD_ENABLED] ?: false,
+            ytAccountEmail = prefs[Keys.YT_ACCOUNT_EMAIL] ?: ""
         )
     }
 
@@ -116,5 +118,9 @@ class AppSettingsRepository @Inject constructor(
 
     suspend fun updateHourlyUploadEnabled(value: Boolean) {
         dataStore.edit { it[Keys.HOURLY_UPLOAD_ENABLED] = value }
+    }
+
+    suspend fun updateYtAccountEmail(email: String) {
+        dataStore.edit { it[Keys.YT_ACCOUNT_EMAIL] = email }
     }
 }

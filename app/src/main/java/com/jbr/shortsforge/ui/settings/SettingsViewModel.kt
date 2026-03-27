@@ -8,6 +8,7 @@ import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.preferences.AppSettingsRepository
 import com.jbr.shortsforge.data.repository.ProfileRepository
 import android.content.Context
+import android.util.Log
 import com.jbr.shortsforge.engine.AutoUploadScheduler
 import com.jbr.shortsforge.engine.ProfileScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -51,11 +52,21 @@ class SettingsViewModel @Inject constructor(
     // ── Global settings ────────────────────────────────────────────────────
 
     fun updateImagesPerShort(value: Int) {
-        viewModelScope.launch { repository.updateImagesPerShort(value) }
+        viewModelScope.launch {
+            repository.updateImagesPerShort(value)
+            activeProfile.value?.let { profile ->
+                profileRepository.updateProfile(profile.copy(imagesPerShort = value))
+            }
+        }
     }
 
     fun updateVideoDuration(value: Int) {
-        viewModelScope.launch { repository.updateVideoDuration(value) }
+        viewModelScope.launch {
+            repository.updateVideoDuration(value)
+            activeProfile.value?.let { profile ->
+                profileRepository.updateProfile(profile.copy(videoDuration = value))
+            }
+        }
     }
 
     fun updateAspectRatio(value: String) {
@@ -63,11 +74,21 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun updateDefaultTransition(value: String) {
-        viewModelScope.launch { repository.updateDefaultTransition(value) }
+        viewModelScope.launch {
+            repository.updateDefaultTransition(value)
+            activeProfile.value?.let { profile ->
+                profileRepository.updateProfile(profile.copy(defaultTransition = value))
+            }
+        }
     }
 
     fun updateDefaultFilter(value: String) {
-        viewModelScope.launch { repository.updateDefaultFilter(value) }
+        viewModelScope.launch {
+            repository.updateDefaultFilter(value)
+            activeProfile.value?.let { profile ->
+                profileRepository.updateProfile(profile.copy(defaultFilter = value))
+            }
+        }
     }
 
     fun updateOutputResolution(value: String) {
@@ -75,7 +96,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun updateAutoAddTextOverlay(value: Boolean) {
-        viewModelScope.launch { repository.updateAutoAddTextOverlay(value) }
+        viewModelScope.launch {
+            repository.updateAutoAddTextOverlay(value)
+            activeProfile.value?.let { profile ->
+                profileRepository.updateProfile(profile.copy(autoAddTextOverlay = value))
+            }
+        }
     }
 
     fun updateDefaultFileName(value: String) {
@@ -119,16 +145,20 @@ class SettingsViewModel @Inject constructor(
     fun updateAutoUploadTime(hour: Int, minute: Int) {
         viewModelScope.launch {
             val profile = profileRepository.activeProfile.first() ?: return@launch
+            // 1. Save to DB first
             profileRepository.updateSchedule(
                 profile.id, profile.autoUploadEnabled,
                 hour, minute,
                 profile.hourlyUploadEnabled
             )
+            Log.d("SettingsVM", "Upload time saved: %02d:%02d for profile ${profile.id}".format(hour, minute))
+            // 2. Schedule AFTER DB save, using the exact same hour/minute
             if (profile.autoUploadEnabled) {
                 if (profile.hourlyUploadEnabled) {
                     ProfileScheduler.scheduleHourly(context, profile.id)
                 } else {
                     ProfileScheduler.scheduleDaily(context, profile.id, hour, minute)
+                    Log.d("SettingsVM", "ProfileScheduler.scheduleDaily called: %02d:%02d".format(hour, minute))
                 }
             }
         }
@@ -147,7 +177,16 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val profile = profileRepository.activeProfile.first() ?: return@launch
             profileRepository.updateYouTube(profile.id, email, name)
+            // CRITICAL: also persist to global settings so AutoUploadWorker can retrieve
+            // the email in the background (GoogleSignIn is not available when app is closed)
+            repository.updateYtAccountEmail(email)
         }
+    }
+
+    // ── Global YouTube email (for background AutoUploadWorker) ─────────────
+
+    fun saveYtAccountEmail(email: String) {
+        viewModelScope.launch { repository.updateYtAccountEmail(email) }
     }
 
     // ── Per-profile: platforms ─────────────────────────────────────────────
@@ -191,6 +230,15 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val profile = profileRepository.activeProfile.first() ?: return@launch
             profileRepository.disconnectTikTok(profile.id)
+        }
+    }
+
+    // ── Per-profile: Folder settings ───────────────────────────────────────
+
+    fun updateFolder(folderUri: String) {
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first() ?: return@launch
+            profileRepository.updateFolder(profile.id, folderUri)
         }
     }
 }

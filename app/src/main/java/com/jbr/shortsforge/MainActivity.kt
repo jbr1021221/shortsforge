@@ -15,7 +15,7 @@ import com.jbr.shortsforge.engine.AutoUploadScheduler
 import com.jbr.shortsforge.engine.ViewRefreshWorker
 import com.jbr.shortsforge.data.repository.ProfileRepository
 import com.jbr.shortsforge.engine.ProfileScheduler
-import androidx.work.ExistingWorkPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
 import kotlinx.coroutines.CoroutineScope
 
 import kotlinx.coroutines.Dispatchers
@@ -27,12 +27,24 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     @Inject lateinit var repository: AppSettingsRepository
     @Inject lateinit var profileRepository: ProfileRepository
+    @Inject lateinit var moodRepository: com.jbr.shortsforge.data.repository.MoodRepository
+    @Inject lateinit var moodScheduler: com.jbr.shortsforge.engine.MoodScheduler
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        // Notify user if not granted if needed
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         ViewRefreshWorker.schedule(this)
+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         CoroutineScope(Dispatchers.IO).launch {
             val settings = repository.settingsFlow.first()
@@ -51,7 +63,7 @@ class MainActivity : ComponentActivity() {
                     this@MainActivity,
                     settings.autoUploadHour,
                     settings.autoUploadMinute,
-                    policy = ExistingWorkPolicy.KEEP
+                    policy = ExistingPeriodicWorkPolicy.KEEP
                 )
             }
 
@@ -65,11 +77,15 @@ class MainActivity : ComponentActivity() {
                         ProfileScheduler.scheduleDaily(
                             this@MainActivity, profile.id,
                             profile.autoUploadHour, profile.autoUploadMinute,
-                            policy = ExistingWorkPolicy.KEEP
+                            policy = ExistingPeriodicWorkPolicy.KEEP
                         )
                     }
                 }
             }
+
+            // Reschedule ALL enabled moods
+            val moodConfigs = moodRepository.allMoodConfigs.first()
+            moodScheduler.scheduleAllEnabled(this@MainActivity, moodConfigs)
         }
 
         setContent {

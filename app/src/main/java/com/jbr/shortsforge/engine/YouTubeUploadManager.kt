@@ -26,7 +26,7 @@ object YouTubeUploadManager {
 
     suspend fun uploadVideo(
         context: Context,
-        account: GoogleSignInAccount,
+        email: String,
         videoFile: File,
         title: String,
         description: String,
@@ -42,11 +42,16 @@ object YouTubeUploadManager {
                     return@withContext
                 }
 
+                if (email.isBlank()) {
+                    withContext(Dispatchers.Main) { onError("No YouTube account email provided") }
+                    return@withContext
+                }
+
                 val credential = GoogleAccountCredential.usingOAuth2(
                     context,
                     listOf("https://www.googleapis.com/auth/youtube.upload")
                 ).apply {
-                    selectedAccount = account.account
+                    selectedAccountName = email
                 }
 
                 val youtube = YouTube.Builder(
