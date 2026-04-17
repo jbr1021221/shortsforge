@@ -47,15 +47,19 @@ class BootReceiver : BroadcastReceiver() {
                     if (profile.autoUploadEnabled) {
                         Log.d(TAG, "Rescheduling profile '${profile.name}' " +
                                 "at ${profile.autoUploadHour}:${profile.autoUploadMinute}")
-                        if (profile.hourlyUploadEnabled) {
-                            ProfileScheduler.scheduleHourly(context, profile.id, policy = ExistingPeriodicWorkPolicy.KEEP)
-                        } else {
-                            ProfileScheduler.scheduleDaily(
-                                context, profile.id,
-                                profile.autoUploadHour,
-                                profile.autoUploadMinute,
-                                policy = ExistingPeriodicWorkPolicy.KEEP
-                            )
+                        when {
+                            profile.sixHourlyUploadEnabled ->
+                                ProfileScheduler.scheduleSixHourly(context, profile.id, policy = ExistingPeriodicWorkPolicy.KEEP)
+                            profile.biHourlyUploadEnabled ->
+                                ProfileScheduler.scheduleBiHourly(context, profile.id, policy = ExistingPeriodicWorkPolicy.KEEP)
+                            profile.hourlyUploadEnabled ->
+                                ProfileScheduler.scheduleHourly(context, profile.id, policy = ExistingPeriodicWorkPolicy.KEEP)
+                            else ->
+                                ProfileScheduler.scheduleDaily(
+                                    context, profile.id,
+                                    profile.autoUploadHour, profile.autoUploadMinute,
+                                    policy = ExistingPeriodicWorkPolicy.KEEP
+                                )
                         }
                         scheduled++
                     }

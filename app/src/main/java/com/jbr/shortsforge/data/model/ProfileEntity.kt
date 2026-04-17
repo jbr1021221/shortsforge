@@ -41,6 +41,10 @@ data class ProfileEntity(
     val autoUploadHour: Int = 10,
     val autoUploadMinute: Int = 0,
     val hourlyUploadEnabled: Boolean = false,
+    @androidx.room.ColumnInfo(defaultValue = "0")
+    val biHourlyUploadEnabled: Boolean = false,
+    @androidx.room.ColumnInfo(defaultValue = "0")
+    val sixHourlyUploadEnabled: Boolean = false,
     val autoUploadTitle: String = "",
 
     // ── Video generation settings ─────────────────────────────────────────

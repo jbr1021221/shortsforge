@@ -4,7 +4,9 @@ import com.jbr.shortsforge.data.model.ImageItem
 import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.model.SlideItem
 import com.jbr.shortsforge.data.preferences.AppSettingsRepository
+import com.jbr.shortsforge.data.repository.UsedImageLog
 import kotlinx.coroutines.flow.first
+import android.content.Context
 import android.util.Log
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -29,33 +31,56 @@ class AutoGenerateEngine @Inject constructor(
     private val transitions = listOf("Fade", "Slide", "Zoom", "Dissolve")
 
     // ── Original — reads from global AppSettings (used by manual editor) ──
-    suspend fun generateShort(images: List<ImageItem>): List<SlideItem> {
+    suspend fun generateShort(context: Context, images: List<ImageItem>): List<SlideItem> {
         if (images.isEmpty()) return emptyList()
         val settings = settingsRepository.settingsFlow.first()
-        return buildSlides(
-            images = images,
+        // Apply cooldown filter
+        val lockedIds = UsedImageLog.getLockedIds(
+            context         = context,
+            cooldownEnabled = settings.imageCooldownEnabled,
+            cooldownDays    = settings.imageCooldownDays
+        )
+        val availableImages = images.filter { it.id !in lockedIds }.ifEmpty { images }
+        val slides = buildSlides(
+            images = availableImages,
             imagesPerShort = settings.imagesPerShort,
             videoDurationSec = settings.videoDuration,
             defaultFilter = settings.defaultFilter,
             defaultTransition = settings.defaultTransition,
             autoAddText = settings.autoAddTextOverlay
         )
+        // Mark selected images as used
+        val usedIds = slides.map { it.imageUri }
+        UsedImageLog.markUsed(context, usedIds)
+        return slides
     }
 
     // ── NEW — reads settings from a ProfileEntity (used by ProfileWorker) ─
     suspend fun generateShortForProfile(
+        context: Context,
         images: List<ImageItem>,
         profile: ProfileEntity
     ): List<SlideItem> {
         if (images.isEmpty()) return emptyList()
-        return buildSlides(
-            images = images,
+        val settings = settingsRepository.settingsFlow.first()
+        // Apply cooldown filter (uses global cooldown settings)
+        val lockedIds = UsedImageLog.getLockedIds(
+            context         = context,
+            cooldownEnabled = settings.imageCooldownEnabled,
+            cooldownDays    = settings.imageCooldownDays
+        )
+        val availableImages = images.filter { it.id !in lockedIds }.ifEmpty { images }
+        val slides = buildSlides(
+            images = availableImages,
             imagesPerShort = profile.imagesPerShort,
             videoDurationSec = profile.videoDuration,
             defaultFilter = profile.defaultFilter,
             defaultTransition = profile.defaultTransition,
             autoAddText = profile.autoAddTextOverlay
         )
+        val usedIds = slides.map { it.imageUri }
+        UsedImageLog.markUsed(context, usedIds)
+        return slides
     }
 
     private fun buildSlides(

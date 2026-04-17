@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.jbr.shortsforge.data.model.AudioItem
 import com.jbr.shortsforge.data.model.MusicSettings
 import com.jbr.shortsforge.data.model.SlideItem
+import com.jbr.shortsforge.data.preferences.AppSettingsRepository
 import com.jbr.shortsforge.data.preferences.FolderPreferencesRepository
+import com.jbr.shortsforge.data.repository.TemplateRepository
 import com.jbr.shortsforge.engine.MusicManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +34,9 @@ data class EditorUiState(
 @HiltViewModel
 class EditorViewModel @Inject constructor(
     private val musicManager: MusicManager,
-    private val folderPrefs: FolderPreferencesRepository
+    private val folderPrefs: FolderPreferencesRepository,
+    private val settingsRepository: AppSettingsRepository,
+    private val templateRepository: TemplateRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(EditorUiState())
@@ -40,8 +44,28 @@ class EditorViewModel @Inject constructor(
 
     fun setSlides(slides: List<SlideItem>) {
         if (_uiState.value.slides.isEmpty()) {
-            _uiState.value = _uiState.value.copy(slides = slides)
-            checkMusicFolder()
+            viewModelScope.launch {
+                // Auto-apply the default template (if one is set) to all slides
+                val defaultTemplateId = settingsRepository.settingsFlow.first().defaultTemplateId
+                val finalSlides = if (defaultTemplateId != null) {
+                    val template = templateRepository.getById(defaultTemplateId)
+                    template?.let { t ->
+                        slides.map { slide ->
+                            slide.copy(
+                                filterName     = t.filterName,
+                                transitionName = t.transitionName,
+                                durationMs     = t.durationMs,
+                                fontSize       = t.fontSize,
+                                textColor      = t.textColor,
+                                textPosition   = t.textPosition
+                            )
+                        }
+                    } ?: slides
+                } else slides
+
+                _uiState.value = _uiState.value.copy(slides = finalSlides)
+                checkMusicFolder()
+            }
         }
     }
 
@@ -177,6 +201,16 @@ class EditorViewModel @Inject constructor(
                 slides = currentSlides,
                 selectedIndex = newSelectedIndex
             )
+        }
+    }
+
+    // ── Template apply ─────────────────────────────────────────────────────
+
+    fun updateSlideAtIndex(index: Int, update: (SlideItem) -> SlideItem) {
+        val current = _uiState.value.slides.toMutableList()
+        if (index in current.indices) {
+            current[index] = update(current[index])
+            _uiState.value = _uiState.value.copy(slides = current)
         }
     }
 }

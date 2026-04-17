@@ -7,9 +7,15 @@ import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
@@ -27,13 +33,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.core.content.FileProvider
 import androidx.media3.common.MediaItem
@@ -45,6 +54,10 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+// (Removed local hardcoded design tokens)
+private val PreviewChipShape     = RoundedCornerShape(50.dp)
+private val PreviewCardShape     = RoundedCornerShape(20.dp)
 
 @kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, UnstableApi::class)
 @Composable
@@ -69,6 +82,14 @@ fun PreviewScreen(
     val uploadTitle = remember { mutableStateOf("ShortsForge_${SimpleDateFormat("dd_MMM_yyyy", Locale.getDefault()).format(Date())}") }
     val uploadDescription = remember { mutableStateOf("") }
     val uploadPrivacy = remember { mutableStateOf("Public") }
+
+    BackHandler(enabled = true) {
+        if (isUploading) {
+            uploadJob?.cancel()
+            isUploading = false
+        }
+        onNavigateBack()
+    }
 
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -157,35 +178,49 @@ fun PreviewScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
-                    Text(
-                        "Preview", 
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 20.sp
-                    ) 
+                title = {
+                    Column {
+                        Text(
+                            "Preview",
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 20.sp
+                        )
+                        if (fileName.isNotEmpty()) {
+                            Text(fileName, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), fontSize = 11.sp)
+                        }
+                    }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        if (isUploading) {
+                            uploadJob?.cancel()
+                            isUploading = false
+                        }
+                        onNavigateBack()
+                    }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1A1A1A)
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         },
-        containerColor = Color.Black
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(MaterialTheme.colorScheme.background),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Video Player Area
@@ -210,7 +245,7 @@ fun PreviewScreen(
                             .aspectRatio(9f / 16f)
                     )
                 } else {
-                    CircularProgressIndicator(color = Color.White)
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
 
                 // Floating Filename Label
@@ -223,106 +258,146 @@ fun PreviewScreen(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(top = 12.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
             }
 
-            // Bottom Actions
-            Surface(
-                tonalElevation = 8.dp,
-                shadowElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF0D0D0D)
-            ) {
-                Column(
+            // ── Glass bottom action bar ───────────────────────────────
+            // Gradient scrim behind bar
+                val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                Box(
                     modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.8f))
+                            )
+                        )
+                        .padding(horizontal = 16.dp, vertical = 20.dp)
                 ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+                    // Row 1: Share + Save
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Share
-                        OutlinedButton(
-                            onClick = { shareVideo(context, videoPath) },
-                            modifier = Modifier.weight(1f).height(56.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                        // Share outlined pill
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(PreviewChipShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, PreviewChipShape)
+                                .clickable { shareVideo(context, videoPath) }
+                                .padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Share", fontWeight = FontWeight.Bold)
-                        }
-
-                        // Save
-                        Button(
-                            onClick = { saveToGallery(context, videoPath) },
-                            modifier = Modifier.weight(1f).height(56.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Save", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // YouTube (Outlined)
-                        OutlinedButton(
-                            onClick = { openYouTube(context) },
-                            modifier = Modifier.weight(1f).height(56.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("YouTube", fontWeight = FontWeight.Bold)
-                        }
-
-                        // Create
-                        Button(
-                            onClick = onExportAnother,
-                            modifier = Modifier.weight(1f).height(56.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Create", fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // YouTube Upload Button
-                    Button(
-                        onClick = {
-                            if (GoogleAuthManager.isSignedIn(context)) {
-                                showUploadDialog = true
-                            } else {
-                                signInLauncher.launch(GoogleAuthManager.getSignInIntent(context))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Share, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                Text("Share", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+                        }
+
+                        // Save filled pill
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(PreviewChipShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                                .clickable { saveToGallery(context, videoPath) }
+                                .padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+                                Text("Save", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    // Row 2: YouTube + Create Another
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(Icons.Default.FileUpload, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Upload to YouTube", fontWeight = FontWeight.Bold)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(PreviewChipShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, PreviewChipShape)
+                                .clickable { openYouTube(context) }
+                                .padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                Text("YouTube", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(PreviewChipShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, PreviewChipShape)
+                                .clickable { onExportAnother() }
+                                .padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                Text("New", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    // Row 3: Upload to YouTube — full width filled pill
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(PreviewChipShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .clickable {
+                                if (GoogleAuthManager.isSignedIn(context)) showUploadDialog = true
+                                else signInLauncher.launch(GoogleAuthManager.getSignInIntent(context))
+                            }
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.FileUpload, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
+                            Text(
+                                "Upload to YouTube",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
+                            )
+                        }
                     }
                 }
             }
-            
-            Spacer(Modifier.height(8.dp))
+
+            Spacer(Modifier.height(0.dp))
         }
     }
 
@@ -421,10 +496,19 @@ fun PreviewScreen(
     }
 
     if (uploadError != null) {
+        val (errorTitle, errorBody) = remember(uploadError) { friendlyUploadError(uploadError!!) }
         AlertDialog(
             onDismissRequest = { uploadError = null },
-            title = { Text("Upload Failed") },
-            text = { Text(uploadError!!) },
+            icon = {
+                Icon(Icons.Default.CloudOff, null,
+                    tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(28.dp))
+            },
+            title = { Text(errorTitle, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(errorBody,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 20.sp)
+            },
             confirmButton = {
                 Button(onClick = { 
                     uploadError = null
@@ -507,4 +591,19 @@ private fun saveToGallery(context: android.content.Context, path: String?) {
     } ?: run {
         Toast.makeText(context, "Failed to save video", Toast.LENGTH_SHORT).show()
     }
+}
+
+private fun friendlyUploadError(raw: String): Pair<String, String> = when {
+    raw.contains("auth", ignoreCase = true) || raw.contains("sign", ignoreCase = true) ->
+        "Sign-in required" to "Your Google session expired. Sign in again to continue uploading."
+    raw.contains("quota", ignoreCase = true) || raw.contains("limit", ignoreCase = true) ->
+        "Daily limit reached" to "YouTube's daily upload quota has been hit. Try again tomorrow or use a different account."
+    raw.contains("network", ignoreCase = true) || raw.contains("timeout", ignoreCase = true) || raw.contains("connect", ignoreCase = true) ->
+        "Connection problem" to "Couldn't reach YouTube. Check your internet connection and try again."
+    raw.contains("size", ignoreCase = true) || raw.contains("large", ignoreCase = true) ->
+        "File too large" to "The video file exceeds YouTube's size limit. Try exporting at 720p."
+    raw.contains("private", ignoreCase = true) || raw.contains("forbidden", ignoreCase = true) ->
+        "Permission denied" to "Your account doesn't have permission to upload. Check your YouTube channel is active."
+    else ->
+        "Upload failed" to "Something went wrong. Check your connection and try again."
 }

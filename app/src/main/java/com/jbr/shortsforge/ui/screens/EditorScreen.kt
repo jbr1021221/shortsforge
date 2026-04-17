@@ -2,7 +2,16 @@ package com.jbr.shortsforge.ui.screens
 
 import android.media.MediaPlayer
 import android.net.Uri
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,13 +27,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -35,6 +44,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
@@ -43,7 +54,20 @@ import com.jbr.shortsforge.data.model.AudioItem
 import com.jbr.shortsforge.data.model.MusicSettings
 import com.jbr.shortsforge.data.model.SlideItem
 import com.jbr.shortsforge.ui.editor.EditorViewModel
+import com.jbr.shortsforge.ui.templates.TemplatesViewModel
 import kotlinx.coroutines.delay
+
+// ── Editor Design Tokens ─────────────────────────────────────────────────────
+// (Removed local hardcoded design tokens)
+private val EditorCardShape     = RoundedCornerShape(20.dp)
+private val EditorChipShape     = RoundedCornerShape(50.dp)
+
+@Composable
+private fun Modifier.eGlassCard() = this
+    .clip(EditorCardShape)
+    .background(MaterialTheme.colorScheme.surfaceVariant)
+    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, EditorCardShape)
+    .padding(14.dp)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
 @Composable
@@ -55,9 +79,12 @@ fun EditorScreen(
     onExport: (List<SlideItem>, MusicSettings) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showDiscardDialog by remember { mutableStateOf(false) }
-    var showMusicPicker by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf(0) }
+    var showDiscardDialog   by remember { mutableStateOf(false) }
+    var showMusicPicker     by remember { mutableStateOf(false) }
+    var showTemplateLibrary by remember { mutableStateOf(false) }
+    var showSaveTemplate    by remember { mutableStateOf(false) }
+    var selectedTab         by remember { mutableStateOf(0) }
+    val templatesViewModel: TemplatesViewModel = hiltViewModel()
 
     LaunchedEffect(slides) {
         if (slides.isNotEmpty()) viewModel.setSlides(slides)
@@ -95,88 +122,154 @@ fun EditorScreen(
 
     Scaffold(
         topBar = {
-            Column {
+            Column(
+                modifier = Modifier.background(MaterialTheme.colorScheme.background)
+            ) {
                 TopAppBar(
                     modifier = Modifier.statusBarsPadding(),
                     title = {
-                        Text("Editor", fontWeight = FontWeight.Bold,
-                            color = Color.White, fontSize = 20.sp)
+                        Text(
+                            "Editor",
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 20.sp
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = { showDiscardDialog = true }) {
-                            Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                            Icon(Icons.Default.ArrowBack, "Back", tint = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     actions = {
-                        TextButton(onClick = { onPreview(uiState.slides) }) {
-                            Icon(Icons.Default.PlayArrow, null,
-                                modifier = Modifier.size(18.dp), tint = Color.White)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Preview", color = Color.White)
+                        // ── Templates icon ───────────────────────────────────────────────
+                        IconButton(onClick = { showTemplateLibrary = true }) {
+                            Icon(
+                                Icons.Default.Style, "Templates",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
-                        Button(
-                            onClick = { onExport(uiState.slides, uiState.musicSettings) },
-                            modifier = Modifier.padding(horizontal = 8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.Red, contentColor = Color.White)
+                        // ── Save as Template icon ───────────────────────────────────
+                        IconButton(
+                            onClick = { showSaveTemplate = true },
+                            enabled = uiState.slides.isNotEmpty()
                         ) {
-                            Icon(Icons.Default.FileUpload, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Export")
+                            Icon(
+                                Icons.Default.BookmarkAdd, "Save template",
+                                tint = if (uiState.slides.isNotEmpty()) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))
-                )
-
-                TabRow(
-                    selectedTabIndex = selectedTab,
-                    containerColor = Color(0xFF1A1A1A),
-                    contentColor = Color.White,
-                    indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(
-                            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                            color = Color.Red
-                        )
-                    }
-                ) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        selectedContentColor = Color.White,
-                        unselectedContentColor = Color.Gray,
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.VideoLibrary, null,
-                                    modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Slides", fontWeight = FontWeight.Medium)
+                        // ── Preview pill button ──────────────────────────────────────
+                        Box(
+                            modifier = Modifier
+                                .clip(EditorChipShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .clickable(enabled = uiState.slides.isNotEmpty()) { onPreview(uiState.slides) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null,
+                                    modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                Text("Preview", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                         }
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1; viewModel.loadMusicFiles() },
-                        selectedContentColor = Color.White,
-                        unselectedContentColor = Color.Gray,
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.MusicNote, null,
+                        Spacer(Modifier.width(8.dp))
+                        // Export filled button
+                        Box(
+                            modifier = Modifier
+                                .clip(EditorChipShape)
+                                .background(if (uiState.slides.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.38f))
+                                .clickable(enabled = uiState.slides.isNotEmpty()) { onExport(uiState.slides, uiState.musicSettings) }
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.FileUpload, null,
                                     modifier = Modifier.size(16.dp),
-                                    tint = when {
-                                        uiState.musicSettings.isMusicEnabled -> Color.Red
-                                        selectedTab == 1 -> Color.White
-                                        else -> Color.Gray
-                                    })
-                                Spacer(Modifier.width(6.dp))
-                                Text("Music", fontWeight = FontWeight.Medium)
-                                if (uiState.musicSettings.isMusicEnabled) {
+                                    tint = if (uiState.slides.isNotEmpty()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.38f))
+                                Text("Export", color = if (uiState.slides.isNotEmpty()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.38f),
+                                     fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
+
+                // ── Premium pill tab switcher ─────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clip(EditorChipShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, EditorChipShape)
+                        .padding(4.dp)
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        listOf(
+                            0 to (Icons.Default.VideoLibrary to "Slides"),
+                            1 to (Icons.Default.MusicNote to "Music")
+                        ).forEach { (idx, pair) ->
+                            val (icon, label) = pair
+                            val isSelected = selectedTab == idx
+                            val bgColor by animateColorAsState(
+                                targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                animationSpec = tween(250, easing = FastOutSlowInEasing),
+                                label = "tab_bg"
+                            )
+                            val textColor by animateColorAsState(
+                                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                              else MaterialTheme.colorScheme.onSurfaceVariant,
+                                animationSpec = tween(250), label = "tab_text"
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(EditorChipShape)
+                                    .background(bgColor)
+                                    .clickable {
+                                        selectedTab = idx
+                                        if (idx == 1) viewModel.loadMusicFiles()
+                                    }
+                                    .padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    icon, null,
+                                    modifier = Modifier.size(15.dp),
+                                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                           else if (idx == 1 && uiState.musicSettings.isMusicEnabled) MaterialTheme.colorScheme.primary
+                                           else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    label, color = textColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                                if (idx == 1 && uiState.musicSettings.isMusicEnabled) {
                                     Spacer(Modifier.width(4.dp))
-                                    Box(Modifier.size(6.dp).background(Color.Red, CircleShape))
+                                    Box(
+                                        Modifier.size(6.dp)
+                                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                    )
                                 }
                             }
                         }
-                    )
+                    }
                 }
             }
         }
@@ -187,38 +280,105 @@ fun EditorScreen(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            when (selectedTab) {
-                0 -> {
-                    FilmstripSection(
-                        slides = uiState.slides,
-                        selectedIndex = uiState.selectedIndex,
-                        onSelect = { viewModel.selectSlide(it) }
-                    )
-                    HorizontalDivider()
-                    if (currentSlide != null) {
-                        SlidesEditingPanel(
-                            slide = currentSlide,
-                            onUpdate = { viewModel.updateSelectedSlide(it) }
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        slideInHorizontally { it } + fadeIn(tween(220)) togetherWith
+                        slideOutHorizontally { -it } + fadeOut(tween(180))
+                    } else {
+                        slideInHorizontally { -it } + fadeIn(tween(220)) togetherWith
+                        slideOutHorizontally { it } + fadeOut(tween(180))
+                    }
+                },
+                label = "tab_content"
+            ) { tab ->
+                when (tab) {
+                    0 -> Column {
+                        FilmstripSection(
+                            slides = uiState.slides,
+                            selectedIndex = uiState.selectedIndex,
+                            onSelect = { viewModel.selectSlide(it) }
+                        )
+                        HorizontalDivider()
+                        if (currentSlide != null) {
+                            SlidesEditingPanel(
+                                slide = currentSlide,
+                                onUpdate = { viewModel.updateSelectedSlide(it) }
+                            )
+                        }
+                    }
+                    1 -> {
+                        MusicTab(
+                            slides = uiState.slides,
+                            musicSettings = uiState.musicSettings,
+                            hasMusicFolder = uiState.hasMusicFolder,
+                            availableMusic = uiState.availableMusic,
+                            isLoadingMusic = uiState.isLoadingMusic,
+                            selectedAudioDurationMs = uiState.selectedAudioDurationMs,
+                            onOpenMusicPicker = { showMusicPicker = true; viewModel.loadMusicFiles() },
+                            onRemoveMusic = { viewModel.removeMusic() },
+                            onToggleMusic = { viewModel.toggleMusic(it) },
+                            onVolumeChange = { viewModel.updateMusicVolume(it) },
+                            onMusicWindowDrag = { viewModel.updateMusicStartPosition(it) }
                         )
                     }
-                }
-                1 -> {
-                    MusicTab(
-                        slides = uiState.slides,
-                        musicSettings = uiState.musicSettings,
-                        hasMusicFolder = uiState.hasMusicFolder,
-                        availableMusic = uiState.availableMusic,
-                        isLoadingMusic = uiState.isLoadingMusic,
-                        selectedAudioDurationMs = uiState.selectedAudioDurationMs,
-                        onOpenMusicPicker = { showMusicPicker = true; viewModel.loadMusicFiles() },
-                        onRemoveMusic = { viewModel.removeMusic() },
-                        onToggleMusic = { viewModel.toggleMusic(it) },
-                        onVolumeChange = { viewModel.updateMusicVolume(it) },
-                        onMusicWindowDrag = { viewModel.updateMusicStartPosition(it) }
-                    )
+                    else -> Unit
                 }
             }
         }
+    }
+
+    // ── Template Library full-screen dialog ────────────────────────────────────────
+    if (showTemplateLibrary) {
+        Dialog(
+            onDismissRequest = { showTemplateLibrary = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
+                TemplateLibraryScreen(
+                    viewModel = templatesViewModel,
+                    onNavigateBack = { showTemplateLibrary = false },
+                    onTemplateClick = { template ->
+                        uiState.slides.indices.forEach { i ->
+                            viewModel.updateSlideAtIndex(i) { slide ->
+                                slide.copy(
+                                    filterName     = template.filterName,
+                                    transitionName = template.transitionName,
+                                    durationMs     = template.durationMs,
+                                    fontSize       = template.fontSize,
+                                    textColor      = template.textColor,
+                                    textPosition   = template.textPosition
+                                )
+                            }
+                        }
+                        showTemplateLibrary = false
+                    }
+                )
+            }
+        }
+    }
+
+    // ── Save as Template bottom sheet ─────────────────────────────────────────────
+    if (showSaveTemplate && uiState.slides.isNotEmpty()) {
+        val firstSlide = uiState.slides.first()
+        SaveTemplateSheet(
+            viewModel            = templatesViewModel,
+            currentFilterName    = firstSlide.filterName,
+            currentTransitionName= firstSlide.transitionName,
+            currentDurationMs    = firstSlide.durationMs,
+            currentFontSize      = firstSlide.fontSize,
+            currentTextColor     = firstSlide.textColor,
+            currentTextPosition  = firstSlide.textPosition,
+            currentAspectRatio   = "9:16",
+            currentResolution    = "1080p",
+            onDismiss = { showSaveTemplate = false },
+            onSaved   = { showSaveTemplate = false }
+        )
     }
 }
 
@@ -376,7 +536,7 @@ private fun TimelineSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0D0D0D))
+            .background(MaterialTheme.colorScheme.background)
     ) {
         // ── Top bar: song name + selection range + play button ────────────
         Row(
@@ -389,21 +549,21 @@ private fun TimelineSection(
             Column(Modifier.weight(1f)) {
                 Text(
                     musicSettings.selectedMusicName ?: "Music",
-                    fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(3.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).background(Color.Red, CircleShape))
+                    Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
                     Spacer(Modifier.width(5.dp))
                     Text(
                         "${formatDuration(musicSettings.trimStartMs)} → ${formatDuration(musicSettings.trimEndMs)}",
-                        color = Color.Red, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                        color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold
                     )
                     Text(
                         "  /  ${formatDuration(selectedAudioDurationMs)}",
-                        color = Color(0xFF666666), fontSize = 12.sp
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
                     )
                 }
             }
@@ -411,18 +571,18 @@ private fun TimelineSection(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .background(Color.Red, CircleShape)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
                     .clickable { onPlayPause() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    null, tint = Color.White, modifier = Modifier.size(22.dp)
+                    null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(22.dp)
                 )
             }
         }
 
-        HorizontalDivider(color = Color(0xFF1E1E1E))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(14.dp))
 
         // ── Waveform tape + fixed bracket ─────────────────────────────────
@@ -453,6 +613,8 @@ private fun TimelineSection(
                 }
         ) {
             // ── Scrolling waveform tape ──────────────────────────────────
+            val waveColor = MaterialTheme.colorScheme.onSurface
+            val primaryColor = MaterialTheme.colorScheme.primary
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val audioDur = selectedAudioDurationMs
                 val vidDur = videoDurationMs
@@ -481,7 +643,7 @@ private fun TimelineSection(
                     val h = (size.height * 0.85f * heightFrac).coerceAtLeast(size.height * 0.07f)
 
                     drawRoundRect(
-                        color = Color.White,
+                        color = waveColor,
                         topLeft = androidx.compose.ui.geometry.Offset(x, centerY - h / 2f),
                         size = androidx.compose.ui.geometry.Size(barGap * 0.72f, h),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(barGap * 0.4f)
@@ -492,7 +654,7 @@ private fun TimelineSection(
                 if (isPlaying && previewProgress > 0f) {
                     val needleX = previewProgress.coerceIn(0f, 1f) * size.width
                     drawLine(
-                        color = Color.Red,
+                        color = primaryColor,
                         start = androidx.compose.ui.geometry.Offset(needleX, 0f),
                         end = androidx.compose.ui.geometry.Offset(needleX, size.height),
                         strokeWidth = 3f
@@ -502,13 +664,13 @@ private fun TimelineSection(
 
             // ── Fixed bracket (always full-width) ────────────────────────
             Box(modifier = Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxWidth().height(3.dp).background(Color.Red).align(Alignment.TopCenter))
-                Box(Modifier.fillMaxWidth().height(3.dp).background(Color.Red).align(Alignment.BottomCenter))
+                Box(Modifier.fillMaxWidth().height(3.dp).background(MaterialTheme.colorScheme.primary).align(Alignment.TopCenter))
+                Box(Modifier.fillMaxWidth().height(3.dp).background(MaterialTheme.colorScheme.primary).align(Alignment.BottomCenter))
                 // Left handle
                 Box(
                     Modifier
                         .width(12.dp).fillMaxHeight()
-                        .background(Color.Red, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
                         .align(Alignment.CenterStart),
                     contentAlignment = Alignment.Center
                 ) {
@@ -516,7 +678,7 @@ private fun TimelineSection(
                         horizontalAlignment = Alignment.CenterHorizontally) {
                         repeat(3) {
                             Box(Modifier.width(2.dp).height(12.dp)
-                                .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(1.dp)))
+                                .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f), RoundedCornerShape(1.dp)))
                         }
                     }
                 }
@@ -524,7 +686,7 @@ private fun TimelineSection(
                 Box(
                     Modifier
                         .width(12.dp).fillMaxHeight()
-                        .background(Color.Red, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
                         .align(Alignment.CenterEnd),
                     contentAlignment = Alignment.Center
                 ) {
@@ -547,24 +709,24 @@ private fun TimelineSection(
                 modifier = Modifier
                     .fillMaxWidth().height(3.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0xFF2A2A2A))
+                    .background(MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(progressFrac.coerceAtLeast(0.015f))
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(2.dp))
-                        .background(Color.Red)
+                        .background(MaterialTheme.colorScheme.primary)
                 )
             }
             Spacer(Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("0:00", color = Color(0xFF555555), fontSize = 10.sp)
+                Text("0:00", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                 Text(
                     formatDuration(musicSettings.trimStartMs),
-                    color = Color.Red, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                    color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold
                 )
-                Text(formatDuration(selectedAudioDurationMs), color = Color(0xFF555555), fontSize = 10.sp)
+                Text(formatDuration(selectedAudioDurationMs), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
             }
         }
 
@@ -572,7 +734,7 @@ private fun TimelineSection(
 
         Text(
             "← Drag waveform to choose which part of music plays →",
-            color = Color(0xFF444444), fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
         )
@@ -596,7 +758,7 @@ private fun TrackControlsSection(
     // Now playing info
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFF1A1A1A),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -604,11 +766,11 @@ private fun TrackControlsSection(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .background(Color.Red.copy(alpha = 0.15f), CircleShape),
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Default.MusicNote, null,
-                        tint = Color.Red, modifier = Modifier.size(22.dp))
+                        tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -616,19 +778,19 @@ private fun TrackControlsSection(
                         fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     Row {
-                        Text("Using: ", color = Color.Gray, fontSize = 11.sp)
+                        Text("Using: ", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                         Text(formatDuration(videoDurationMs),
-                            color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text(" from ${formatDuration(musicSettings.trimStartMs)}",
-                            color = Color.Gray, fontSize = 11.sp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                 }
                 Switch(
                     checked = musicSettings.isMusicEnabled,
                     onCheckedChange = onToggleMusic,
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.Red,
-                        checkedTrackColor = Color.Red.copy(alpha = 0.5f))
+                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                 )
             }
         }
@@ -637,7 +799,7 @@ private fun TrackControlsSection(
     // Volume
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFF1A1A1A),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -646,22 +808,22 @@ private fun TrackControlsSection(
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("Volume", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text("${(musicSettings.musicVolume * 100).toInt()}%",
-                    color = Color.Red, fontWeight = FontWeight.Bold)
+                    color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.VolumeDown, null,
-                    tint = Color.Gray, modifier = Modifier.size(20.dp))
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                 Slider(
                     value = musicSettings.musicVolume,
                     onValueChange = onVolumeChange,
                     valueRange = 0f..1f,
                     modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                     colors = SliderDefaults.colors(
-                        thumbColor = Color.Red, activeTrackColor = Color.Red)
+                        thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                 )
                 Icon(Icons.Default.VolumeUp, null,
-                    tint = Color.Gray, modifier = Modifier.size(20.dp))
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -671,8 +833,8 @@ private fun TrackControlsSection(
         OutlinedButton(
             onClick = onOpenMusicPicker,
             modifier = Modifier.weight(1f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
         ) {
             Icon(Icons.Default.SwapHoriz, null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
@@ -681,8 +843,8 @@ private fun TrackControlsSection(
         OutlinedButton(
             onClick = onRemoveMusic,
             modifier = Modifier.weight(1f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Gray)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
         ) {
             Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
@@ -698,16 +860,16 @@ private fun NoMusicFolderHint() {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(32.dp))
         Icon(Icons.Default.MusicOff, null,
-            tint = Color.Gray, modifier = Modifier.size(56.dp))
+            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(56.dp))
         Spacer(Modifier.height(12.dp))
         Text("No Music Folder Found", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(Modifier.height(8.dp))
         Text("Create a 'Music' folder inside your image folder.",
-            color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
-        Surface(color = Color(0xFF1A1A1A), shape = RoundedCornerShape(8.dp)) {
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp)) {
             Text("📁 YourFolder/\n   📁 Music/\n      🎵 song.mp3",
-                color = Color.Gray, fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp,
                 modifier = Modifier.padding(16.dp))
         }
     }
@@ -722,17 +884,17 @@ private fun NoTrackSelected(
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(24.dp))
         Icon(Icons.Default.LibraryMusic, null,
-            tint = Color.Red, modifier = Modifier.size(52.dp))
+            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(52.dp))
         Spacer(Modifier.height(12.dp))
         Text("No music selected", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(Modifier.height(4.dp))
         Text("Select a track — it will auto-fit to your video length",
-            color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(20.dp))
         Button(
             onClick = onOpenMusicPicker,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
             Icon(Icons.Default.MusicNote, null)
             Spacer(Modifier.width(8.dp))
@@ -740,13 +902,13 @@ private fun NoTrackSelected(
         }
         if (isLoadingMusic) {
             Spacer(Modifier.height(16.dp))
-            CircularProgressIndicator(color = Color.Red, modifier = Modifier.size(24.dp))
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
         } else if (availableMusic.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            HorizontalDivider(color = Color.Gray.copy(alpha = 0.2f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(8.dp))
             Text("${availableMusic.size} track${if (availableMusic.size > 1) "s" else ""} available",
-                color = Color.Gray, fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
                 modifier = Modifier.align(Alignment.Start))
             Spacer(Modifier.height(8.dp))
             availableMusic.forEach { audio ->
@@ -758,15 +920,15 @@ private fun NoTrackSelected(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.MusicNote, null,
-                        tint = Color.Gray, modifier = Modifier.size(18.dp))
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(audio.fileName, fontSize = 13.sp, maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        Text(formatDuration(audio.durationMs), color = Color.Gray, fontSize = 11.sp)
+                        Text(formatDuration(audio.durationMs), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                     Icon(Icons.Default.ChevronRight, null,
-                        tint = Color.Gray, modifier = Modifier.size(16.dp))
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                 }
                 HorizontalDivider(color = Color.Gray.copy(alpha = 0.1f))
             }
@@ -833,27 +995,27 @@ private fun MusicPickerDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.MusicNote, null, tint = Color.Red)
-                Spacer(Modifier.width(8.dp))
-                Text("Select Music")
-            }
-        },
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Select Music", fontWeight = FontWeight.ExtraBold)
+                }
+            },
         text = {
             Box(modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 400.dp)) {
                 when {
                     isLoading -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color.Red)
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
                     musicList.isEmpty() -> Column(Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.FolderOff, null,
-                            tint = Color.Gray, modifier = Modifier.size(48.dp))
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                         Spacer(Modifier.height(12.dp))
-                        Text("No music found", color = Color.Gray, fontWeight = FontWeight.Bold)
+                        Text("No music found", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
                         Text("Add MP3 files to a 'Music' folder inside your image folder.",
-                            color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, textAlign = TextAlign.Center)
                     }
                     else -> Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                         musicList.forEach { audio ->
@@ -861,13 +1023,13 @@ private fun MusicPickerDialog(
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable { onSelect(audio) }
                                     .background(
-                                        if (isSelected) Color.Red.copy(alpha = 0.1f)
+                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                                         else Color.Transparent, RoundedCornerShape(8.dp))
                                     .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.MusicNote, null,
-                                    tint = if (isSelected) Color.Red else Color.Gray,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
@@ -877,9 +1039,9 @@ private fun MusicPickerDialog(
                                     Text(formatDuration(audio.durationMs),
                                         color = Color.Gray, fontSize = 12.sp)
                                 }
-                                if (isSelected) Icon(Icons.Default.Check, null, tint = Color.Red)
+                                if (isSelected) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
                             }
-                            HorizontalDivider(color = Color.Gray.copy(alpha = 0.1f))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         }
                     }
                 }
@@ -894,45 +1056,139 @@ private fun MusicPickerDialog(
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun FilmstripSection(slides: List<SlideItem>, selectedIndex: Int, onSelect: (Int) -> Unit) {
-    Column(modifier = Modifier.padding(vertical = 12.dp)) {
-        Text("Timeline", style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(modifier = Modifier.padding(vertical = 10.dp)) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier.size(4.dp).clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+                Text(
+                    "Timeline",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.2.sp
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(Icons.Default.SwapHoriz, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(13.dp))
+                Text("Drag to reorder",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             itemsIndexed(slides) { index, slide ->
                 val isSelected = index == selectedIndex
-                val borderWidth by animateDpAsState(if (isSelected) 3.dp else 1.dp)
-                Card(
-                    modifier = Modifier.width(100.dp).height(140.dp)
+                val borderWidth by animateDpAsState(
+                    targetValue = if (isSelected) 2.5.dp else 0.5.dp,
+                    label = "filmstrip_border"
+                )
+                Box(
+                    modifier = Modifier
+                        .width(100.dp).height(140.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(
+                            borderWidth,
+                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(14.dp)
+                        )
                         .clickable { onSelect(index) }
-                        .border(borderWidth,
-                            if (isSelected) MaterialTheme.colorScheme.primary
-                            else Color.Transparent, RoundedCornerShape(8.dp)),
-                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        GlideImage(model = slide.imageUri, contentDescription = null,
-                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        if (slide.filterName != "None") {
-                            Surface(modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                shape = RoundedCornerShape(4.dp)) {
-                                Text(slide.filterName,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
-                            }
+                    // Image fill
+                    GlideImage(
+                        model = slide.imageUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
+                    )
+
+                    // Drag handle overlay
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .size(20.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(4.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.DragHandle, null,
+                            tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(12.dp))
+                    }
+
+                    // Bottom gradient scrim
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .align(Alignment.BottomCenter)
+                            .clip(RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                )
+                            )
+                    )
+
+                    // Filter badge
+                    if (slide.filterName != "None") {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart).padding(5.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                slide.filterName,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                        Box(modifier = Modifier
-                            .align(Alignment.BottomEnd).padding(4.dp).size(24.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), CircleShape),
-                            contentAlignment = Alignment.Center) {
-                            Icon(getTransitionIcon(slide.transitionName), null,
-                                tint = Color.White, modifier = Modifier.size(14.dp))
-                        }
+                    }
+
+                    // Transition icon
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd).padding(5.dp).size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            getTransitionIcon(slide.transitionName),
+                            null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+
+                    // Selected overlay ring
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        )
                     }
                 }
             }
@@ -1003,9 +1259,33 @@ fun formatDuration(ms: Long): String {
 
 @Composable
 private fun SettingsGroup(label: String, content: @Composable ColumnScope.() -> Unit) {
-    Column {
-        Text(label, style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier.width(3.dp).height(14.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    label,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.0.sp
+                )
+            }
+        }
         content()
     }
 }
@@ -1022,7 +1302,7 @@ private fun FilterOption(name: String, isSelected: Boolean, onClick: () -> Unit)
                 else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
                 RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center) {
-            if (isSelected) Icon(Icons.Default.Check, null, tint = Color.White)
+            if (isSelected) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onPrimary)
         }
         Text(name, style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(top = 4.dp))
@@ -1056,7 +1336,7 @@ private fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
             Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Color(ci))
                 .border(if (selectedColor == ci) 2.dp else 1.dp,
                     if (selectedColor == ci) MaterialTheme.colorScheme.primary
-                    else Color.Gray.copy(alpha = 0.3f), CircleShape)
+                    else MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 .clickable { onColorSelected(ci) })
         }
     }
@@ -1064,8 +1344,13 @@ private fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
 
 @Composable
 private fun PositionToggle(selectedPosition: String, onPositionChange: (String) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-        .background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(4.dp)
+    ) {
         listOf("Top","Center","Bottom").forEach { pos ->
             val isSelected = selectedPosition == pos
             Box(modifier = Modifier.weight(1f).clickable { onPositionChange(pos) }

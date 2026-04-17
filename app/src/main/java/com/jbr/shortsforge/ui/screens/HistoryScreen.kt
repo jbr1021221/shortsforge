@@ -2,11 +2,13 @@ package com.jbr.shortsforge.ui.screens
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -30,23 +32,24 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ── Theme tokens ──────────────────────────────────────────────────────────────
-private val HBg        = Color(0xFF0D0D0D)
-private val HCard      = Color(0xFF181818)
-private val HCardAlt   = Color(0xFF222222)
-private val HGreen     = Color(0xFF4CAF50)
-private val HRed       = Color(0xFFEF5350)
-private val HBlue      = Color(0xFF2196F3)
-private val HPurple    = Color(0xFF9C27B0)
-private val HOrange    = Color(0xFFFF9800)
-private val HAmber     = Color(0xFFFFB300)
-private val HMuted     = Color(0xFF666666)
-private val HText      = Color(0xFFEEEEEE)
-private val HTextSub   = Color(0xFF999999)
+// (Removed local hardcoded design tokens)
+
+private val CardShape_H  = RoundedCornerShape(20.dp)
+private val ChipShape_H  = RoundedCornerShape(50.dp)
+
+@Composable
+private fun Modifier.glassCard_H() = this
+    .clip(CardShape_H)
+    .background(MaterialTheme.colorScheme.surfaceVariant)
+    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape_H)
+    .padding(16.dp)
+
+// ── Entry Models ──────────────────────────────────────────────────────────────
 
 data class HistoryEntry(
     val timestampMs: Long,
@@ -66,22 +69,19 @@ fun HistoryScreen(onNavigateBack: () -> Unit) {
     var entries by remember { mutableStateOf<List<HistoryEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    // ── FIX: Re-load history every time the screen is RESUMED ────────────────
-    // Using LaunchedEffect(Unit) only fires once on first composition.
-    // When navigating back to this screen, the composable stays in the back
-    // stack, so Unit never changes. We watch the lifecycle state instead so
-    // the list is refreshed every time the screen becomes active again.
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
 
     LaunchedEffect(lifecycleState) {
         if (lifecycleState == Lifecycle.State.RESUMED) {
             isLoading = true
+            val startMs = System.currentTimeMillis()
             entries = loadHistoryEntries(context)
+            val elapsed = System.currentTimeMillis() - startMs
+            if (elapsed < 300) kotlinx.coroutines.delay(300 - elapsed)
             isLoading = false
         }
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     Scaffold(
         topBar = {
@@ -90,13 +90,13 @@ fun HistoryScreen(onNavigateBack: () -> Unit) {
                     Column {
                         Text(
                             "Upload Activity",
-                            fontWeight = FontWeight.Bold,
-                            color = HText,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 20.sp
                         )
                         Text(
                             "${entries.size} upload session${if (entries.size != 1) "s" else ""}",
-                            color = HMuted,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                     }
@@ -106,14 +106,19 @@ fun HistoryScreen(onNavigateBack: () -> Unit) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = HText
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HBg)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
-        containerColor = HBg
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
 
         when {
@@ -122,58 +127,57 @@ fun HistoryScreen(onNavigateBack: () -> Unit) {
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = HGreen)
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
             entries.isEmpty() -> EmptyHistoryState(modifier = Modifier.padding(padding))
             else -> {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-                contentPadding = PaddingValues(bottom = 40.dp, top = 8.dp)
-            ) {
-
-                // ── Summary banner ────────────────────────────────────────────
-                item {
-                    SummaryBanner(entries = entries)
-                    Spacer(Modifier.height(20.dp))
-                    Text(
-                        "RECENT ACTIVITY",
-                        color = HMuted,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                // ── Timeline entries ──────────────────────────────────────────
-                itemsIndexed(entries) { index, entry ->
-                    val visible = remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) {
-                        kotlinx.coroutines.delay(index * 60L)
-                        visible.value = true
-                    }
-                    AnimatedVisibility(
-                        visible = visible.value,
-                        enter = fadeIn(tween(300)) + slideInVertically(tween(300)) { it / 2 }
-                    ) {
-                        TimelineEntryCard(
-                            entry = entry,
-                            isLast = index == entries.lastIndex
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                    contentPadding = PaddingValues(bottom = 40.dp, top = 8.dp)
+                ) {
+                    // ── Summary banner ────────────────────────────────────────
+                    item {
+                        SummaryBanner(entries = entries)
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            "RECENT ACTIVITY",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp
                         )
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    // ── Timeline entries ──────────────────────────────────────
+                    itemsIndexed(entries) { index, entry ->
+                        val visible = remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            delay(index * 30L + 50L)
+                            visible.value = true
+                        }
+                        AnimatedVisibility(
+                            visible = visible.value,
+                            enter = fadeIn(tween(300)) + slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 2 }
+                        ) {
+                            TimelineEntryCard(
+                                entry = entry,
+                                isLast = index == entries.lastIndex
+                            )
+                        }
                     }
                 }
-            }   // end LazyColumn
-            }   // end else ->
-        }       // end when
-    }           // end Scaffold
-}               // end HistoryScreen
+            }
+        }
+    }
+}
 
-// ── Summary banner ─────────────────────────────────────────────────────────────
+// ── Summary banner ────────────────────────────────────────────────────────────
 
 @Composable
 private fun SummaryBanner(entries: List<HistoryEntry>) {
@@ -185,46 +189,59 @@ private fun SummaryBanner(entries: List<HistoryEntry>) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF1A2A1A), Color(0xFF1A1A2A))
-                )
-            )
+            .clip(CardShape_H)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape_H)
             .padding(20.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            // Inner gradient box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), 
+                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)
+                            )
+                        )
+                    )
+                    .padding(16.dp)
             ) {
-                BannerStat(
-                    modifier = Modifier.weight(1f),
-                    label = "Sessions",
-                    value = entries.size.toString(),
-                    color = HBlue
-                )
-                BannerStat(
-                    modifier = Modifier.weight(1f),
-                    label = "Uploaded",
-                    value = totalPlatformUploads.toString(),
-                    color = HGreen
-                )
-                BannerStat(
-                    modifier = Modifier.weight(1f),
-                    label = "Failed",
-                    value = failedCount.toString(),
-                    color = if (failedCount > 0) HRed else HMuted
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    BannerStat(
+                        modifier = Modifier.weight(1f),
+                        label = "Sessions",
+                        value = entries.size.toString(),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    BannerStat(
+                        modifier = Modifier.weight(1f),
+                        label = "Uploaded",
+                        value = totalPlatformUploads.toString(),
+                        color = Color(0xFF34C759)
+                    )
+                    BannerStat(
+                        modifier = Modifier.weight(1f),
+                        label = "Failed",
+                        value = failedCount.toString(),
+                        color = if (failedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+                    )
+                }
             }
 
             if (platformCounts.isNotEmpty()) {
-                HorizontalDivider(color = Color(0xFF2A2A2A), thickness = 0.5.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Platforms:", color = HMuted, fontSize = 12.sp)
+                    Text("Platforms:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     platformCounts.forEach { (platform, count) ->
                         PlatformChip(platform = platform, count = count, success = true)
                     }
@@ -237,14 +254,11 @@ private fun SummaryBanner(entries: List<HistoryEntry>) {
 @Composable
 private fun BannerStat(modifier: Modifier, label: String, value: String, color: Color) {
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.3f))
-            .padding(12.dp),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(value, color = color, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-        Text(label, color = HMuted, fontSize = 11.sp)
+        Text(label, color = MaterialTheme.colorScheme.outline, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -266,54 +280,44 @@ private fun TimelineEntryCard(entry: HistoryEntry, isLast: Boolean) {
     val allSuccess = failedPlatforms.isEmpty() && successPlatforms.isNotEmpty()
 
     Row(modifier = Modifier.fillMaxWidth()) {
-        // ── Timeline spine ───────────────────────────────────────────────────
+        // ── Timeline spine ─────────────────────────────────────────────────
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(48.dp)
+            modifier = Modifier.width(28.dp)
         ) {
+            // Dot
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(12.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (allSuccess) HGreen.copy(alpha = 0.2f)
-                        else if (failedPlatforms.isNotEmpty()) HRed.copy(alpha = 0.2f)
-                        else HMuted.copy(alpha = 0.2f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (allSuccess) Icons.Default.CheckCircle
-                    else if (failedPlatforms.isNotEmpty() && successPlatforms.isNotEmpty()) Icons.Default.Warning
-                    else Icons.Default.CloudUpload,
-                    contentDescription = null,
-                    tint = if (allSuccess) HGreen
-                    else if (failedPlatforms.isNotEmpty()) HRed
-                    else HMuted,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+                    .background(if (allSuccess) Color(0xFF34C759) else MaterialTheme.colorScheme.error)
+            )
+            // Vertical connector line
             if (!isLast) {
                 Box(
                     modifier = Modifier
                         .width(2.dp)
-                        .defaultMinSize(minHeight = 40.dp)
-                        .fillMaxHeight()
-                        .background(Color(0xFF2A2A2A))
+                        .height(88.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    if (allSuccess) Color(0xFF34C759).copy(alpha = 0.4f) else MaterialTheme.colorScheme.error.copy(alpha = 0.4f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
                 )
             }
         }
 
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(8.dp))
 
-        // ── Entry card ───────────────────────────────────────────────────────
+        // ── Entry card ──────────────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .weight(1f)
                 .padding(bottom = if (isLast) 0.dp else 12.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(HCard)
-                .padding(14.dp),
+                .glassCard_H(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Date/time header
@@ -329,24 +333,23 @@ private fun TimelineEntryCard(entry: HistoryEntry, isLast: Boolean) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(HBlue.copy(alpha = 0.15f))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text(dayStr, color = HBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(dayStr, color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(dateStr, color = HText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(dateStr, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(
-                        Icons.Default.Schedule,
-                        null,
-                        tint = HMuted,
+                        Icons.Default.Schedule, null,
+                        tint = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.size(12.dp)
                     )
-                    Text(timeStr, color = HMuted, fontSize = 12.sp)
+                    Text(timeStr, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             }
 
@@ -356,11 +359,12 @@ private fun TimelineEntryCard(entry: HistoryEntry, isLast: Boolean) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(Icons.Default.VideoLibrary, null, tint = HMuted, modifier = Modifier.size(13.dp))
+                    Icon(Icons.Default.VideoLibrary, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(13.dp))
                     Text(
                         entry.videoTitle,
-                        color = HTextSub,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
@@ -369,8 +373,8 @@ private fun TimelineEntryCard(entry: HistoryEntry, isLast: Boolean) {
 
             // Platform badges
             if (entry.platforms.isNotEmpty()) {
-                HorizontalDivider(color = Color(0xFF252525), thickness = 0.5.dp)
-                Text("Platforms", color = HMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                Text("Platforms", color = MaterialTheme.colorScheme.outline, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -384,16 +388,16 @@ private fun TimelineEntryCard(entry: HistoryEntry, isLast: Boolean) {
     }
 }
 
-// ── Platform badge ─────────────────────────────────────────────────────────────
+// ── Platform badge ────────────────────────────────────────────────────────────
 
 @Composable
 private fun PlatformBadge(platform: PlatformEntry) {
     val (color, emoji) = platformStyle(platform.name)
-    val statusColor = if (platform.success) color else HRed
+    val statusColor = if (platform.success) color else MaterialTheme.colorScheme.error
 
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(ChipShape_H)
             .background(statusColor.copy(alpha = 0.13f))
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -404,7 +408,7 @@ private fun PlatformBadge(platform: PlatformEntry) {
             platform.name,
             color = statusColor,
             fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.Bold
         )
         Icon(
             imageVector = if (platform.success) Icons.Default.Check else Icons.Default.Close,
@@ -415,14 +419,14 @@ private fun PlatformBadge(platform: PlatformEntry) {
     }
 }
 
-// ── Platform chip (for summary) ────────────────────────────────────────────────
+// ── Platform chip (for summary) ───────────────────────────────────────────────
 
 @Composable
 private fun PlatformChip(platform: String, count: Int, success: Boolean) {
     val (color, emoji) = platformStyle(platform)
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(ChipShape_H)
             .background(color.copy(alpha = 0.13f))
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -433,7 +437,7 @@ private fun PlatformChip(platform: String, count: Int, success: Boolean) {
     }
 }
 
-// ── Empty state ────────────────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────
 
 @Composable
 private fun EmptyHistoryState(modifier: Modifier = Modifier) {
@@ -443,32 +447,34 @@ private fun EmptyHistoryState(modifier: Modifier = Modifier) {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(32.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(80.dp)
+                    .size(96.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF1A1A1A)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(2.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    Icons.Default.History,
+                    Icons.Default.CloudUpload,
                     null,
-                    tint = Color(0xFF444444),
+                    tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                     modifier = Modifier.size(40.dp)
                 )
             }
+            Spacer(Modifier.height(32.dp))
             Text(
                 "No upload history yet",
-                color = HText,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold
             )
+            Spacer(Modifier.height(12.dp))
             Text(
-                "When the auto-upload runs, each upload\nwill appear here with the time, date,\nand platform details.",
-                color = HMuted,
+                "When the auto-upload runs or you export\nmanually, each upload will appear here.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp
@@ -490,12 +496,6 @@ private fun platformStyle(name: String): Pair<Color, String> = when (name.lowerc
 /**
  * Always reads BOTH storage keys and merges the results so that
  * uploads recorded before and after the v2 migration all appear.
- *
- *  - records_v2  → new per-session format with full platform array
- *  - records     → legacy daily-aggregate format (date+time+count)
- *
- * De-duplication: v2 entries take priority; legacy entries are only added
- * if their timestamp doesn't already exist in the v2 list.
  */
 private fun loadHistoryEntries(context: Context): List<HistoryEntry> {
     val prefs = context.getSharedPreferences("upload_history", Context.MODE_PRIVATE)
@@ -510,7 +510,7 @@ private fun loadHistoryEntries(context: Context): List<HistoryEntry> {
                 try {
                     val obj = arr.getJSONObject(i)
                     val ts = obj.optLong("timestampMs", 0L)
-                    if (ts == 0L) continue           // skip malformed
+                    if (ts == 0L) continue
                     val platformsArr = obj.optJSONArray("platforms") ?: JSONArray()
                     val platforms = (0 until platformsArr.length()).map { j ->
                         val p = platformsArr.getJSONObject(j)
@@ -524,15 +524,12 @@ private fun loadHistoryEntries(context: Context): List<HistoryEntry> {
                         platforms   = platforms,
                         videoTitle  = obj.optString("videoTitle", "")
                     )
-                } catch (ignored: Exception) { /* skip bad entry */ }
+                } catch (ignored: Exception) {}
             }
         }
-    } catch (ignored: Exception) { /* records_v2 unreadable, skip */ }
+    } catch (ignored: Exception) {}
 
     // ── 2. Read legacy records format ─────────────────────────────────────
-    // Each record represents one day with a count of uploads.
-    // We expand count > 1 into multiple entries spaced 1 minute apart,
-    // so each upload shows as a distinct row.
     val v2Timestamps = all.map { it.timestampMs }.toSet()
     try {
         val raw = prefs.getString("records", null)
@@ -547,7 +544,6 @@ private fun loadHistoryEntries(context: Context): List<HistoryEntry> {
                     val ts  = obj.optLong("timestampMs", 0L)
                     val count = obj.optInt("count", 1).coerceAtLeast(1)
 
-                    // Reconstruct timestamp if missing/zero from "MMM dd" + "HH:mm"
                     val resolvedTs: Long = if (ts > 0L) ts else {
                         try {
                             val dateLabel = obj.optString("dateLabel", "")
@@ -566,14 +562,12 @@ private fun loadHistoryEntries(context: Context): List<HistoryEntry> {
                         } catch (e: Exception) { 0L }
                     }
 
-                    if (resolvedTs == 0L) continue          // still can't determine time
-                    // Skip if already covered by v2 data (within ±5 min window)
+                    if (resolvedTs == 0L) continue
                     val alreadyPresent = v2Timestamps.any {
                         Math.abs(it - resolvedTs) < 5 * 60 * 1000L
                     }
                     if (alreadyPresent) continue
 
-                    // Expand count into individual entries (1 min apart)
                     for (n in 0 until count) {
                         all += HistoryEntry(
                             timestampMs = resolvedTs - n * 60_000L,
@@ -581,10 +575,10 @@ private fun loadHistoryEntries(context: Context): List<HistoryEntry> {
                             videoTitle  = ""
                         )
                     }
-                } catch (ignored: Exception) { /* skip bad entry */ }
+                } catch (ignored: Exception) {}
             }
         }
-    } catch (ignored: Exception) { /* records unreadable, skip */ }
+    } catch (ignored: Exception) {}
 
     return all.sortedByDescending { it.timestampMs }
 }

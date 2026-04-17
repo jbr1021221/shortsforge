@@ -90,14 +90,24 @@ class ProfileRepository @Inject constructor(
         ))
     }
 
-    suspend fun updateSchedule(profileId: Long, enabled: Boolean, hour: Int, minute: Int, hourly: Boolean) {
+    suspend fun updateSchedule(
+        profileId: Long, enabled: Boolean, hour: Int, minute: Int,
+        hourly: Boolean, biHourly: Boolean = false, sixHourly: Boolean = false
+    ) {
         val profile = profileDao.getProfileById(profileId) ?: return
         profileDao.updateProfile(profile.copy(
             autoUploadEnabled = enabled,
             autoUploadHour = hour,
             autoUploadMinute = minute,
-            hourlyUploadEnabled = hourly
+            hourlyUploadEnabled = hourly,
+            biHourlyUploadEnabled = biHourly,
+            sixHourlyUploadEnabled = sixHourly
         ))
+    }
+
+    suspend fun updateBiHourlyUploadEnabled(profileId: Long, enabled: Boolean) {
+        val profile = profileDao.getProfileById(profileId) ?: return
+        profileDao.updateProfile(profile.copy(biHourlyUploadEnabled = enabled))
     }
 
     suspend fun disconnectFacebook(profileId: Long) {

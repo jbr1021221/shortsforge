@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.jbr.shortsforge.data.model.AppSettings
 import kotlinx.coroutines.flow.Flow
@@ -33,7 +34,13 @@ class AppSettingsRepository @Inject constructor(
         val AUTO_UPLOAD_MINUTE = intPreferencesKey("auto_upload_minute")
         val AUTO_UPLOAD_TITLE = stringPreferencesKey("auto_upload_title")
         val HOURLY_UPLOAD_ENABLED = booleanPreferencesKey("hourly_upload_enabled")
+        val BI_HOURLY_UPLOAD_ENABLED = booleanPreferencesKey("bi_hourly_upload_enabled")
+        val SIX_HOURLY_UPLOAD_ENABLED = booleanPreferencesKey("six_hourly_upload_enabled")
         val YT_ACCOUNT_EMAIL = stringPreferencesKey("yt_account_email")
+        val IMAGE_COOLDOWN_ENABLED = booleanPreferencesKey("image_cooldown_enabled")
+        val IMAGE_COOLDOWN_DAYS = intPreferencesKey("image_cooldown_days")
+        val DEFAULT_TEMPLATE_ID = longPreferencesKey("default_template_id")
+        val UNSPLASH_ENABLED = booleanPreferencesKey("unsplash_enabled")
     }
 
     val settingsFlow: Flow<AppSettings> = dataStore.data.map { prefs ->
@@ -54,7 +61,13 @@ class AppSettingsRepository @Inject constructor(
             autoUploadMinute = prefs[Keys.AUTO_UPLOAD_MINUTE] ?: 0,
             autoUploadTitle = prefs[Keys.AUTO_UPLOAD_TITLE] ?: "",
             hourlyUploadEnabled = prefs[Keys.HOURLY_UPLOAD_ENABLED] ?: false,
-            ytAccountEmail = prefs[Keys.YT_ACCOUNT_EMAIL] ?: ""
+            biHourlyUploadEnabled = prefs[Keys.BI_HOURLY_UPLOAD_ENABLED] ?: false,
+            sixHourlyUploadEnabled = prefs[Keys.SIX_HOURLY_UPLOAD_ENABLED] ?: false,
+            ytAccountEmail = prefs[Keys.YT_ACCOUNT_EMAIL] ?: "",
+            imageCooldownEnabled = prefs[Keys.IMAGE_COOLDOWN_ENABLED] ?: false,
+            imageCooldownDays = prefs[Keys.IMAGE_COOLDOWN_DAYS] ?: 7,
+            defaultTemplateId = prefs[Keys.DEFAULT_TEMPLATE_ID],
+            unsplashEnabled = prefs[Keys.UNSPLASH_ENABLED] ?: true
         )
     }
 
@@ -120,7 +133,34 @@ class AppSettingsRepository @Inject constructor(
         dataStore.edit { it[Keys.HOURLY_UPLOAD_ENABLED] = value }
     }
 
+    suspend fun updateBiHourlyUploadEnabled(value: Boolean) {
+        dataStore.edit { it[Keys.BI_HOURLY_UPLOAD_ENABLED] = value }
+    }
+
+    suspend fun updateSixHourlyUploadEnabled(value: Boolean) {
+        dataStore.edit { it[Keys.SIX_HOURLY_UPLOAD_ENABLED] = value }
+    }
+
     suspend fun updateYtAccountEmail(email: String) {
         dataStore.edit { it[Keys.YT_ACCOUNT_EMAIL] = email }
+    }
+
+    suspend fun updateCooldownEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.IMAGE_COOLDOWN_ENABLED] = enabled }
+    }
+
+    suspend fun updateCooldownDays(days: Int) {
+        dataStore.edit { it[Keys.IMAGE_COOLDOWN_DAYS] = days.coerceIn(1, 30) }
+    }
+
+    suspend fun updateUnsplashEnabled(value: Boolean) {
+        dataStore.edit { it[Keys.UNSPLASH_ENABLED] = value }
+    }
+
+    suspend fun updateDefaultTemplateId(id: Long?) {
+        dataStore.edit {
+            if (id == null) it.remove(Keys.DEFAULT_TEMPLATE_ID)
+            else it[Keys.DEFAULT_TEMPLATE_ID] = id
+        }
     }
 }

@@ -15,17 +15,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,8 +45,18 @@ import kotlinx.coroutines.launch
 
 private val FacebookBlue  = Color(0xFF1877F2)
 private val InstagramPink = Color(0xFFE1306C)
-private val TikTokDark    = Color(0xFF010101)
+private val TikTokDark    = Color(0xFF69C9D0)
+private val TikTokBlack   = TikTokDark
 private val GreenOk       = Color(0xFF4CAF50)
+
+@Composable
+private fun Modifier.pGlassCard() = this
+    .clip(RoundedCornerShape(20.dp))
+    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+    .padding(16.dp)
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,64 +78,170 @@ fun ProfilesScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Profiles", fontWeight = FontWeight.Bold,
-                        color = Color.White, fontSize = 20.sp)
+                    Column {
+                        Text(
+                            "Profiles",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 22.sp,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        if (profiles.isNotEmpty()) {
+                            Text(
+                                "${profiles.size} channel${if (profiles.size != 1) "s" else ""} · " +
+                                "${profiles.count { it.isYouTubeConnected }} connected",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer)
                     }
                 },
-                actions = {
-                    IconButton(onClick = { showCreateDialog = true }) {
-                        Icon(Icons.Default.Add, "New Profile", tint = Color.White)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))
+                actions = {},   // FAB handles creation — no duplicate icon needed
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground
+                )
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,
         floatingActionButton = {
-            FloatingActionButton(
+            ExtendedFloatingActionButton(
                 onClick = { showCreateDialog = true },
-                containerColor = Color.Red
-            ) {
-                Icon(Icons.Default.Add, "New Profile", tint = Color.White)
-            }
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = RoundedCornerShape(50.dp),
+                icon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(20.dp)) },
+                text = {
+                    Text(
+                        "New Profile",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+            )
         }
     ) { padding ->
         if (profiles.isEmpty()) {
             Box(
-                Modifier.fillMaxSize().padding(padding),
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .background(MaterialTheme.colorScheme.background),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(32.dp)
+                    modifier = Modifier.padding(horizontal = 36.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    Icon(Icons.Default.AccountCircle, null,
-                        modifier = Modifier.size(80.dp),
-                        tint = MaterialTheme.colorScheme.primary)
-                    Text("No Profiles Yet",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold)
-                    Text("Create a profile for each YouTube channel you want to manage.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { showCreateDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
-                        Icon(Icons.Default.Add, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Create First Profile")
+                    // Icon — abstract channel/broadcast shape, not a person silhouette
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(28.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.VideoLibrary,
+                            contentDescription = null,
+                            tint = Color(0xFFFF3B30),
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(28.dp))
+
+                    Text(
+                        "No channels yet",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 24.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        "Create a profile for each YouTube channel you upload to. Each profile has its own schedule, folder, and accounts.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 21.sp
+                    )
+
+                    Spacer(Modifier.height(32.dp))
+
+                    Button(
+                        onClick = { showCreateDialog = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(50.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Icon(Icons.Default.Add, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Create First Profile",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp)
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+
+                    // "What you'll need" — corrected for Google Sign-in flow
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            "What you'll need",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            letterSpacing = 0.8.sp
+                        )
+                        listOf(
+                            Icons.Default.AccountCircle to "A Google account linked to your YouTube channel",
+                            Icons.Default.Folder        to "A folder of images on your device",
+                            Icons.Default.Schedule      to "Optional: a daily upload time"
+                        ).forEach { (icon, text) ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(icon, null,
+                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp))
+                                Text(text,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 18.sp)
+                            }
+                        }
                     }
                 }
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(padding),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(profiles, key = { it.id }) { profile ->
@@ -190,8 +312,6 @@ fun ProfilesScreen(
     }
 }
 
-// ── Profile card ───────────────────────────────────────────────────────────
-
 @Composable
 private fun ProfileCard(
     profile: ProfileEntity,
@@ -201,146 +321,266 @@ private fun ProfileCard(
     onDelete: () -> Unit,
     onTestUpload: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = if (isActive) 4.dp else 1.dp,
+    var showMenu by rememberSaveable { mutableStateOf(false) }
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) 
+                else MaterialTheme.colorScheme.surface
+            )
             .border(
-                width = if (isActive) 2.dp else 0.dp,
-                color = if (isActive) Color.Red else Color.Transparent,
-                shape = RoundedCornerShape(16.dp)
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(20.dp)
             )
             .clickable { onSetActive() }
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
 
-            // Header row
+            // ── Top row: avatar + name + menu ─────────────────────────────
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Avatar
+                // Gradient avatar — no letter, just a gradient circle with
+                // initials rendered large and bold
+                val gradients = listOf(
+                    listOf(Color(0xFFFF3B30), Color(0xFFFF6B35)),
+                    listOf(Color(0xFF5E5CE6), Color(0xFF9B59B6)),
+                    listOf(Color(0xFF34C759), Color(0xFF30B0C7)),
+                    listOf(Color(0xFFFF9F0A), Color(0xFFFF6B35)),
+                    listOf(Color(0xFF30B0C7), Color(0xFF5E5CE6)),
+                )
+                val gradient = gradients[profile.name.length % gradients.size]
+
                 Box(
-                    Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(if (isActive) Color.Red else Color(0xFF2A2A2A)),
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(14.dp))   // squircle, not circle
+                        .background(
+                            Brush.linearGradient(
+                                colors = if (isActive) listOf(Color(0xFFFF3B30), Color(0xFFAD1457))
+                                         else gradient,
+                                start = Offset(0f, 0f),
+                                end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                            )
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        profile.name.take(1).uppercase(),
+                        text = profile.name.take(2).uppercase(),
                         color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 18.sp,
+                        letterSpacing = (-0.5).sp
                     )
                 }
 
+                // Name + subtitle
                 Column(Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(profile.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            profile.name,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = if (isActive) Color.White
+                                    else MaterialTheme.colorScheme.onSurface
+                        )
                         if (isActive) {
-                            Surface(
-                                color = Color.Red.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(4.dp)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50.dp))
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
-                                Text("ACTIVE", color = Color.Red,
-                                    fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                Text(
+                                    "ACTIVE",
+                                    color = Color.White,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 0.8.sp
+                                )
                             }
                         }
                     }
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         if (profile.isYouTubeConnected) profile.ytAccountEmail
-                        else "No YouTube account",
-                        style = MaterialTheme.typography.bodySmall,
+                        else "No YouTube account linked",
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         color = if (profile.isYouTubeConnected)
                             MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary
                     )
                 }
 
-                // Action buttons
-                Row {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Edit, "Edit",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.primary)
-                    }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Delete, "Delete",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-
-            // Platform + schedule status chips
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                StatusChip("YT", profile.isYouTubeConnected, Color.Red)
-                StatusChip("FB", profile.isFacebookConnected, FacebookBlue)
-                StatusChip("IG", profile.isInstagramConnected, InstagramPink)
-                StatusChip("TK", profile.isTikTokConnected, TikTokDark)
-                Spacer(Modifier.weight(1f))
-                if (profile.autoUploadEnabled) {
-                    Surface(
-                        color = GreenOk.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(6.dp)
+                // ── 3-dot menu (replaces the raw icon buttons) ────────────
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
-                        Row(
-                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(Icons.Default.Schedule, null,
-                                tint = GreenOk, modifier = Modifier.size(12.dp))
-                            Text(
-                                String.format("%02d:%02d",
-                                    profile.autoUploadHour, profile.autoUploadMinute),
-                                color = GreenOk, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                        Icon(
+                            Icons.Default.MoreVert, "Options",
+                            tint = if (isActive) MaterialTheme.colorScheme.onPrimary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Edit, null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurface)
+                                    Text("Edit profile")
+                                }
+                            },
+                            onClick = { showMenu = false; onEdit() }
+                        )
+                        if (isActive && profile.autoUploadEnabled) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.PlayArrow, null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = GreenOk)
+                                        Text("Test upload now", color = GreenOk)
+                                    }
+                                },
+                                onClick = { showMenu = false; onTestUpload() }
                             )
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Delete, null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error)
+                                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            onClick = { showMenu = false; onDelete() }
+                        )
                     }
                 }
             }
 
-            // Folder info
-            if (profile.hasFolderSelected) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(Icons.Default.Folder, null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp))
-                    Text(
-                        profile.folderUri.substringAfterLast("/").take(40),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis
-                    )
+            // ── Platform dots row ─────────────────────────────────────────
+            // Replace text chips with colored dot indicators
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                PlatformDot("YouTube",  profile.isYouTubeConnected,  Color(0xFFFF0000))
+                PlatformDot("Facebook", profile.isFacebookConnected, Color(0xFF1877F2))
+                PlatformDot("Instagram",profile.isInstagramConnected,Color(0xFFE1306C))
+                PlatformDot("TikTok",   profile.isTikTokConnected,   Color(0xFF69C9D0))
+
+                Spacer(Modifier.weight(1f))
+
+                // Schedule badge
+                if (profile.autoUploadEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                        Text(
+                            String.format("%02d:%02d daily",
+                                profile.autoUploadHour, profile.autoUploadMinute),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                } else {
+                    // No schedule
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.outline)
+                        )
+                        Text(
+                            "No schedule",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
 
-            if (isActive && profile.autoUploadEnabled) {
-                OutlinedButton(
-                    onClick = onTestUpload,
-                    modifier = Modifier.fillMaxWidth().height(36.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GreenOk),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, GreenOk.copy(alpha = 0.5f))
+            // ── Folder row (only if set) ──────────────────────────────────
+            if (profile.hasFolderSelected) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.PlayArrow, null, Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Test Upload Now", fontSize = 12.sp)
+                    Icon(
+                        Icons.Default.Folder, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        decodeFolderPath(profile.folderUri),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
@@ -348,22 +588,48 @@ private fun ProfileCard(
 }
 
 @Composable
-private fun StatusChip(label: String, connected: Boolean, color: Color) {
-    Surface(
-        color = if (connected) color.copy(alpha = 0.15f) else Color.Transparent,
-        shape = RoundedCornerShape(4.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (connected) color.copy(alpha = 0.5f)
-            else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-        )
+private fun PlatformDot(name: String, connected: Boolean, color: Color) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(end = 10.dp)
     ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(
+                    if (connected) color.copy(alpha = 0.18f)
+                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+                .border(
+                    0.8.dp,
+                    if (connected) color.copy(alpha = 0.6f)
+                    else MaterialTheme.colorScheme.outlineVariant,
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (connected) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                )
+            }
+        }
+        Spacer(Modifier.height(3.dp))
         Text(
-            label,
-            color = if (connected) color else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-            fontSize = 10.sp,
+            text = when (name) {
+                "YouTube" -> "YT"; "Facebook" -> "FB"
+                "Instagram" -> "IG"; "TikTok" -> "TK"
+                else -> name.take(2)
+            },
+            fontSize = 8.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+            color = if (connected) color.copy(alpha = 0.9f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            letterSpacing = 0.2.sp
         )
     }
 }
@@ -433,6 +699,7 @@ private fun EditProfileSheet(
     var scheduleHour    by remember { mutableStateOf(profile.autoUploadHour) }
     var scheduleMinute  by remember { mutableStateOf(profile.autoUploadMinute) }
     var hourlyEnabled   by remember { mutableStateOf(profile.hourlyUploadEnabled) }
+    var biHourlyEnabled by remember { mutableStateOf(profile.biHourlyUploadEnabled) }
     var showTimePicker  by remember { mutableStateOf(false) }
 
     // State for FB dialog
@@ -452,7 +719,20 @@ private fun EditProfileSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
+        }
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -462,33 +742,72 @@ private fun EditProfileSheet(
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             // Title
-            Text("Edit: ${profile.name}",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold)
-
-            HorizontalDivider()
+            Column {
+                Text(
+                    profile.name,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 22.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "Edit profile",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             // ── Folder ────────────────────────────────────────────────────
-            SectionCard("📁 Folder") {
-                if (profile.hasFolderSelected) {
-                    Text(profile.folderUri.substringAfterLast("/"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(8.dp))
-                }
-                Button(
-                    onClick = { folderPickerLauncher.launch(null) },
-                    modifier = Modifier.fillMaxWidth()
+            SectionCard("Folder") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(Icons.Default.FolderOpen, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (profile.hasFolderSelected) "Change Folder" else "Select Folder")
+                    // Folder icon box
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Folder, null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (profile.hasFolderSelected) decodeFolderPath(profile.folderUri)
+                            else "No folder selected",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (profile.hasFolderSelected) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            if (profile.hasFolderSelected) "Tap to change" else "Required for video generation",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                    IconButton(
+                        onClick = { folderPickerLauncher.launch(null) },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Icon(Icons.Default.ChevronRight, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp))
+                    }
                 }
             }
 
             // ── YouTube ───────────────────────────────────────────────────
-            SectionCard("▶ YouTube") {
+            SectionCard("YouTube") {
                 if (linkedYtEmail.isNotBlank()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -498,18 +817,24 @@ private fun EditProfileSheet(
                         Column(Modifier.weight(1f)) {
                             Text(linkedYtEmail,
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold)
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface)
                             Text("Linked to this profile",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = GreenOk)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        OutlinedButton(
+                        TextButton(
                             onClick = {
                                 ytLinking = true
                                 GoogleAuthManager.signOut(context)
                                 googleSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context))
                             }
-                        ) { Text("Change") }
+                        ) {
+                            Text("Change",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 } else {
                     Text("No YouTube account linked to this profile.",
@@ -523,11 +848,11 @@ private fun EditProfileSheet(
                             googleSignInLauncher.launch(GoogleAuthManager.getSignInIntent(context))
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         if (ytLinking) {
                             CircularProgressIndicator(Modifier.size(18.dp),
-                                color = Color.White, strokeWidth = 2.dp)
+                                color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
                             Spacer(Modifier.width(8.dp))
                         }
                         Text("Sign in with Google")
@@ -536,7 +861,7 @@ private fun EditProfileSheet(
             }
 
             // ── Social platforms ──────────────────────────────────────────
-            SectionCard("📱 Social Platforms") {
+            SectionCard("Social Platforms") {
                 // Facebook
                 PlatformRow("Facebook", FacebookBlue, profile.isFacebookConnected,
                     onConnect = { showFbDialog = true },
@@ -574,7 +899,7 @@ private fun EditProfileSheet(
             }
 
             // ── Schedule ──────────────────────────────────────────────────
-            SectionCard("⏰ Upload Schedule") {
+            SectionCard("Upload Schedule") {
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -582,7 +907,8 @@ private fun EditProfileSheet(
                 ) {
                     Text("Enable Auto-Upload",
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold)
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (scheduleEnabled) {
                             IconButton(onClick = { showTimePicker = true },
@@ -599,21 +925,38 @@ private fun EditProfileSheet(
                                 if (enabled) showTimePicker = true
                                 else {
                                     viewModel.updateSchedule(profile.id, false,
-                                        scheduleHour, scheduleMinute, hourlyEnabled)
+                                        scheduleHour, scheduleMinute, hourlyEnabled, biHourlyEnabled)
                                     onSaved("Auto-upload disabled for ${profile.name}")
                                 }
-                            }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
                     }
                 }
 
                 if (scheduleEnabled) {
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        String.format("Scheduled for %02d:%02d daily", scheduleHour, scheduleMinute),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = GreenOk
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            Modifier.size(6.dp).clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                        Text(
+                            String.format("Daily at %02d:%02d", scheduleHour, scheduleMinute),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     Row(
                         Modifier.fillMaxWidth(),
@@ -621,14 +964,49 @@ private fun EditProfileSheet(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Hourly mode",
-                            style = MaterialTheme.typography.bodySmall)
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Switch(
                             checked = hourlyEnabled,
                             onCheckedChange = { h ->
                                 hourlyEnabled = h
+                                if (h) biHourlyEnabled = false
                                 viewModel.updateSchedule(profile.id, scheduleEnabled,
-                                    scheduleHour, scheduleMinute, h)
-                            }
+                                    scheduleHour, scheduleMinute, h, biHourlyEnabled)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Every 2 hours mode",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Switch(
+                            checked = biHourlyEnabled,
+                            onCheckedChange = { bh ->
+                                biHourlyEnabled = bh
+                                if (bh) hourlyEnabled = false
+                                viewModel.updateSchedule(profile.id, scheduleEnabled,
+                                    scheduleHour, scheduleMinute, hourlyEnabled, bh)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
                     }
                 }
@@ -638,13 +1016,19 @@ private fun EditProfileSheet(
             Button(
                 onClick = {
                     viewModel.updateSchedule(profile.id, scheduleEnabled,
-                        scheduleHour, scheduleMinute, hourlyEnabled)
+                        scheduleHour, scheduleMinute, hourlyEnabled, biHourlyEnabled)
                     onSaved("Profile saved!")
                     onDismiss()
                 },
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-            ) { Text("Save Profile", fontWeight = FontWeight.Bold) }
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(50.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Save", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
         }
     }
 
@@ -660,7 +1044,7 @@ private fun EditProfileSheet(
                     scheduleMinute = timeState.minute
                     scheduleEnabled = true
                     viewModel.updateSchedule(profile.id, true,
-                        timeState.hour, timeState.minute, hourlyEnabled)
+                        timeState.hour, timeState.minute, hourlyEnabled, biHourlyEnabled)
                     showTimePicker = false
                     onSaved(String.format("Upload scheduled at %02d:%02d for ${profile.name}",
                         timeState.hour, timeState.minute))
@@ -699,15 +1083,26 @@ private fun EditProfileSheet(
 
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Clean section label — no emoji, no red bar
+        Text(
+            text = title.uppercase(),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            letterSpacing = 1.2.sp,
+            modifier = Modifier.padding(horizontal = 2.dp)
+        )
+        // Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .padding(16.dp)
         ) {
-            Column(Modifier.padding(16.dp), content = content)
+            Column(content = content)
         }
     }
 }
@@ -722,37 +1117,58 @@ private fun PlatformRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Platform color dot — small, clean
             Box(
-                Modifier.size(32.dp).clip(CircleShape).background(color),
+                Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(color.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(name.take(2).uppercase(), color = Color.White,
-                    fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Box(
+                    Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                )
             }
             Column {
-                Text(name, style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold)
-                if (isConnected) {
-                    Text("Connected", style = MaterialTheme.typography.bodySmall,
-                        color = GreenOk)
-                }
+                Text(name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    if (isConnected) "Connected" else "Not connected",
+                    fontSize = 11.sp,
+                    color = if (isConnected) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
             }
         }
+
         if (isConnected) {
-            OutlinedButton(
+            TextButton(
                 onClick = onDisconnect,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
             ) { Text("Disconnect", fontSize = 12.sp) }
         } else {
-            Button(
+            OutlinedButton(
                 onClick = onConnect,
-                colors = ButtonDefaults.buttonColors(containerColor = color)
-            ) { Text("Connect", fontSize = 12.sp, color = Color.White) }
+                shape = RoundedCornerShape(50.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                modifier = Modifier.height(34.dp)
+            ) {
+                Text("Connect", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -856,4 +1272,15 @@ private fun TikTokConnectDialogForProfile(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+private fun decodeFolderPath(uri: String): String {
+    return try {
+        val decoded = java.net.URLDecoder.decode(uri, "UTF-8")
+        // Extract just the human-readable path part after the last colon or slash
+        decoded.substringAfterLast(":").substringAfterLast("/")
+            .replace("%2F", "/").trim().take(50)
+    } catch (e: Exception) {
+        uri.substringAfterLast("/").take(50)
+    }
 }

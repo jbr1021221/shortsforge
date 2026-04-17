@@ -3,6 +3,7 @@ package com.jbr.shortsforge.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +55,17 @@ private val MOOD_COLORS = mapOf(
     VideoMood.LIFE_ADVICE to Color(0xFF4CAF50)
 )
 
+// (Removed local hardcoded design tokens)
+private val MoodCardShape     = RoundedCornerShape(20.dp)
+private val MoodChipShape     = RoundedCornerShape(50.dp)
+
+@Composable
+private fun Modifier.mGlassCard() = this
+    .clip(MoodCardShape)
+    .background(MaterialTheme.colorScheme.surfaceVariant)
+    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MoodCardShape)
+    .padding(16.dp)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoodSetupScreen(
@@ -70,18 +83,23 @@ fun MoodSetupScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Mood Video Setup", fontWeight = FontWeight.Bold, color = Color.White) },
+                title = { Text("Mood Video Setup", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
                 actions = {
                     IconButton(onClick = { showScheduleDialog = true }) {
-                        Icon(Icons.Default.Schedule, "Schedule All", tint = Color.White)
+                        Icon(Icons.Default.Schedule, "Schedule All", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
         snackbarHost  = { SnackbarHost(snackbar) },
@@ -94,26 +112,32 @@ fun MoodSetupScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header info card
+            // Header info card — glass style
             item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .mGlassCard()
                 ) {
                     Row(
-                        Modifier.padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Icon(Icons.Default.AutoAwesome, null,
-                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                        Box(
+                            modifier = Modifier.size(48.dp).clip(MoodChipShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, null,
+                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+                        }
                         Column {
-                            Text("Daily Mood Videos", fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleSmall)
+                            Text("Daily Mood Videos", fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
                             Text("Each mood fires on its assigned day. Set image folders, music, and custom quotes per mood.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp)
                         }
                     }
                 }
@@ -123,38 +147,66 @@ fun MoodSetupScreen(
             item {
                 val todayMood = VideoMood.forToday()
                 val todayColor = MOOD_COLORS[todayMood] ?: MaterialTheme.colorScheme.primary
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = todayColor.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, todayColor.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MoodCardShape)
+                        .background(todayColor.copy(alpha = 0.10f))
+                        .border(1.dp, todayColor.copy(alpha = 0.4f), MoodCardShape)
+                        .padding(16.dp)
                 ) {
                     Row(
-                        Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(todayMood.emoji, fontSize = 24.sp)
+                        Text(todayMood.emoji, fontSize = 28.sp)
                         Column(Modifier.weight(1f)) {
-                            Text("Today: ${todayMood.label}", fontWeight = FontWeight.Bold,
-                                color = todayColor, style = MaterialTheme.typography.titleSmall)
+                            Text("Today: ${todayMood.label}",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = todayColor, fontSize = 15.sp)
                             Text("This mood will be used for today's auto-upload",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         }
-                        Button(
-                            onClick = {
-                                viewModel.runNow(todayMood)
-                                scope.launch { snackbar.showSnackbar("${todayMood.emoji} ${todayMood.label} video started!") }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = todayColor),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        Box(
+                            modifier = Modifier
+                                .clip(MoodChipShape)
+                                .background(todayColor)
+                                .clickable {
+                                    viewModel.runNow(todayMood)
+                                    scope.launch { snackbar.showSnackbar("${todayMood.emoji} ${todayMood.label} video started!") }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, null, Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Run Now", fontSize = 12.sp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null,
+                                    modifier = Modifier.size(14.dp), tint = if (todayColor.luminance() > 0.5f) Color.Black else Color.White)
+                                Text("Run Now", color = if (todayColor.luminance() > 0.5f) Color.Black else Color.White, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Default.TouchApp, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(13.dp))
+                    Text(
+                        "Tap a mood card to configure it. One open at a time.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -252,15 +304,15 @@ private fun MoodCard(
         }
     }
 
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = if (isExpanded) 4.dp else 1.dp,
+    Box(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(MoodCardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(
-                width = if (isExpanded) 2.dp else 0.dp,
-                color = if (isExpanded) color else Color.Transparent,
-                shape = RoundedCornerShape(16.dp)
+                width = if (isExpanded) 1.5.dp else 1.dp,
+                color = if (isExpanded) color else MaterialTheme.colorScheme.outlineVariant,
+                shape = MoodCardShape
             )
     ) {
         Column(Modifier.fillMaxWidth()) {
@@ -310,7 +362,11 @@ private fun MoodCard(
             }
 
             // ── Expanded body ───────────────────────────────────────────────
-            AnimatedVisibility(visible = isExpanded) {
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically(animationSpec = tween(250)) + fadeIn(tween(200)),
+                exit  = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(150))
+            ) {
                 Column(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -323,7 +379,13 @@ private fun MoodCard(
                         horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Enable this mood", style = MaterialTheme.typography.bodyMedium)
                         Switch(checked = enabled, onCheckedChange = onEnabledChanged,
-                            colors = SwitchDefaults.colors(checkedThumbColor = color, checkedTrackColor = color.copy(alpha = 0.4f)))
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                uncheckedTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+                                uncheckedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                            ))
                     }
 
                     // Day selector
@@ -417,7 +479,7 @@ private fun DaySelector(selectedDay: Int, color: Color, onDaySelected: (Int) -> 
                     modifier = Modifier.clickable { onDaySelected(day) }
                 ) {
                     Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
                 }
             }
@@ -561,7 +623,7 @@ private fun QuotesEditor(
                                     .clip(CircleShape)
                                     .background(if (newQuote.isNotBlank()) color else color.copy(alpha = 0.3f))
                             ) {
-                                Icon(Icons.Default.Add, "Add", tint = Color.White,
+                                Icon(Icons.Default.Add, "Add", tint = MaterialTheme.colorScheme.onPrimary,
                                     modifier = Modifier.size(20.dp))
                             }
                         }

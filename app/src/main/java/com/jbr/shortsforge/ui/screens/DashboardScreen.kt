@@ -1,11 +1,13 @@
 package com.jbr.shortsforge.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -16,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -27,17 +30,23 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jbr.shortsforge.ui.dashboard.DashboardViewModel
 import com.jbr.shortsforge.ui.dashboard.UploadRecord
+import androidx.compose.foundation.clickable
+import kotlinx.coroutines.delay
 
-// ── Colors matching app dark theme ────────────────────────────────────────
-private val BgPrimary   = Color(0xFF1A1A1A)
-private val BgCard      = Color(0xFF242424)
-private val BgCardAlt   = Color(0xFF2C2C2C)
-private val AccentGreen = Color(0xFF4CAF50)
-private val AccentRed   = Color(0xFFFF5252)
-private val AccentBlue  = Color(0xFF2196F3)
-private val AccentAmber = Color(0xFFFFB300)
-private val TextPrimary = Color.White
-private val TextMuted   = Color(0xFF9E9E9E)
+// (Removed local hardcoded design tokens)
+
+private val CardShape  = RoundedCornerShape(20.dp)
+private val ChipShape  = RoundedCornerShape(50.dp)
+private val InnerShape = RoundedCornerShape(12.dp)
+
+@Composable
+private fun Modifier.glassCard() = this
+    .clip(CardShape)
+    .background(MaterialTheme.colorScheme.surfaceVariant)
+    .border(width = 1.dp, color = MaterialTheme.colorScheme.outlineVariant, shape = CardShape)
+    .padding(16.dp)
+
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,8 +65,8 @@ fun DashboardScreen(
                 title = {
                     Text(
                         "Analytics",
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 20.sp
                     )
                 },
@@ -66,14 +75,19 @@ fun DashboardScreen(
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = TextPrimary
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = BgPrimary)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
-        containerColor = BgPrimary
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
 
         LazyColumn(
@@ -94,23 +108,37 @@ fun DashboardScreen(
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.VideoLibrary,
-                        iconColor = AccentBlue,
+                        iconColor = MaterialTheme.colorScheme.primary,
                         label = "Total",
                         value = state.totalUploads.toString()
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.DateRange,
-                        iconColor = AccentGreen,
+                        iconColor = Color(0xFF34C759),
                         label = "This Week",
                         value = state.uploadsThisWeek.toString()
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.CalendarMonth,
-                        iconColor = AccentAmber,
+                        iconColor = Color(0xFFFFB340),
                         label = "30 Days",
                         value = state.uploadsThisMonth.toString()
+                    )
+                    val context = LocalContext.current
+                    StatCard(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.Lock,
+                        iconColor = Color(0xFFFFB340),
+                        label = "Resting",
+                        value = remember(state.imageCooldownEnabled, state.imageCooldownDays) {
+                            com.jbr.shortsforge.data.repository.UsedImageLog.lockedCount(
+                                context         = context,
+                                cooldownEnabled = state.imageCooldownEnabled,
+                                cooldownDays    = state.imageCooldownDays
+                            ).toString()
+                        }
                     )
                 }
             }
@@ -124,16 +152,18 @@ fun DashboardScreen(
                     InfoCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.LocalFireDepartment,
-                        iconColor = AccentRed,
+                        iconColor = Color(0xFFFFB340),
                         label = "Day Streak",
-                        value = "${state.streak} days"
+                        value = "🔥 ${state.streak} days",
+                        valueColor = Color(0xFFFFB340)
                     )
                     InfoCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Default.Schedule,
-                        iconColor = if (state.isAutoUploadEnabled) AccentGreen else TextMuted,
+                        iconColor = if (state.isAutoUploadEnabled) Color(0xFF34C759) else MaterialTheme.colorScheme.outline,
                         label = "Next Upload",
-                        value = state.nextScheduledTime
+                        value = state.nextScheduledTime,
+                        valueColor = if (state.isAutoUploadEnabled) Color(0xFF34C759) else MaterialTheme.colorScheme.outline
                     )
                 }
             }
@@ -151,10 +181,7 @@ fun DashboardScreen(
             item {
                 SectionTitle("Uploads — Last 7 Days")
                 Spacer(Modifier.height(8.dp))
-                BarChart(
-                    data = state.last7DaysData,
-                    barColor = AccentGreen
-                )
+                BarChart(data = state.last7DaysData)
             }
 
             // ── Upload history list ────────────────────────────────────────
@@ -164,25 +191,54 @@ fun DashboardScreen(
 
             if (state.uploadRecords.isEmpty()) {
                 item {
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(100.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(BgCard),
-                        contentAlignment = Alignment.Center
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            "No uploads yet. Run the automation to get started!",
-                            color = TextMuted,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(16.dp)
+                        Icon(
+                            Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(40.dp)
                         )
+                        Text(
+                            "No uploads recorded yet",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Once you run the auto-upload or export a video,\neach upload will appear here.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.ArrowForward, null,
+                                tint = Color(0xFF4CAF50), modifier = Modifier.size(14.dp))
+                            Text("Go to Settings → Auto-Upload to get started",
+                                fontSize = 11.sp, color = Color(0xFF4CAF50),
+                                fontWeight = FontWeight.Medium)
+                        }
                     }
                 }
             } else {
-                items(state.uploadRecords) { record ->
+                itemsIndexed(state.uploadRecords) { index, record ->
+                    val visible = remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        delay(index * 50L)
+                        visible.value = true
+                    }
                     UploadHistoryRow(record = record)
                 }
             }
@@ -190,7 +246,7 @@ fun DashboardScreen(
     }
 }
 
-// ── Stat card (large number) ───────────────────────────────────────────────
+// ── Stat card ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun StatCard(
@@ -202,36 +258,42 @@ private fun StatCard(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(BgCard)
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
             .padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(40.dp)
                 .clip(CircleShape)
                 .background(iconColor.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(18.dp))
+            Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
         }
         Text(
             text = value,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 26.sp,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
         Text(
             text = label,
-            color = TextMuted,
-            fontSize = 11.sp
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }
 
-// ── Info card (text value) ─────────────────────────────────────────────────
+// ── Info card ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun InfoCard(
@@ -239,12 +301,14 @@ private fun InfoCard(
     icon: ImageVector,
     iconColor: Color,
     label: String,
-    value: String
+    value: String,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(BgCard)
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -259,64 +323,61 @@ private fun InfoCard(
             Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
         }
         Column {
-            Text(value, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(label, color = TextMuted, fontSize = 11.sp)
+            Text(value, color = valueColor, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
 
-// ── Bar chart ─────────────────────────────────────────────────────────────
+// ── Bar chart ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun BarChart(
-    data: List<Pair<String, Int>>,
-    barColor: Color
-) {
-    val maxValue = data.maxOfOrNull { it.second } ?: 1
+private fun BarChart(data: List<Pair<String, Int>>) {
+    val maxValue = data.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
     val chartHeight = 140.dp
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(BgCard)
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
             .padding(16.dp)
     ) {
         if (data.isEmpty() || maxValue == 0) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(chartHeight),
+                modifier = Modifier.fillMaxWidth().height(chartHeight),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No data yet", color = TextMuted, fontSize = 13.sp)
+                Text("No data yet", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(chartHeight),
+                    modifier = Modifier.fillMaxWidth().height(chartHeight),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    data.forEach { (label, count) ->
+                    data.forEachIndexed { _, (label, count) ->
+                        val isBest = count == maxValue && count > 0
                         BarColumn(
                             modifier = Modifier.weight(1f),
                             label = label,
                             count = count,
                             maxValue = maxValue,
                             maxHeight = chartHeight,
-                            barColor = barColor
+                            barColor = if (isBest) Color(0xFFFFB340) else Color(0xFF34C759)
                         )
                     }
                 }
+                // Baseline rule
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), thickness = 1.dp)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("0", color = TextMuted, fontSize = 10.sp)
-                    Text("Max: $maxValue", color = TextMuted, fontSize = 10.sp)
+                    Text("0", color = MaterialTheme.colorScheme.outline, fontSize = 10.sp)
+                    Text("Max: $maxValue", color = MaterialTheme.colorScheme.outline, fontSize = 10.sp)
                 }
             }
         }
@@ -332,7 +393,9 @@ private fun BarColumn(
     maxHeight: androidx.compose.ui.unit.Dp,
     barColor: Color
 ) {
-    val targetFraction = if (maxValue > 0) count.toFloat() / maxValue else 0f
+    val targetFraction = remember(count, maxValue) {
+        if (maxValue > 0) count.toFloat() / maxValue else 0f
+    }
     val animatedFraction by animateFloatAsState(
         targetValue = targetFraction,
         animationSpec = tween(durationMillis = 600),
@@ -356,25 +419,26 @@ private fun BarColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(if (count > 0) barHeightFraction.coerceAtLeast(4.dp) else 2.dp)
-                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                .background(if (count > 0) barColor else BgCardAlt)
+                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                .background(if (count > 0) barColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
         )
 
         Spacer(Modifier.height(4.dp))
-        Text(label, color = TextMuted, fontSize = 10.sp)
+        Text(label, color = MaterialTheme.colorScheme.outline, fontSize = 10.sp)
     }
 }
 
-// ── Upload history row ─────────────────────────────────────────────────────
+// ── Upload history row ────────────────────────────────────────────────────────
 
 @Composable
 private fun UploadHistoryRow(record: UploadRecord) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(BgCard)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -386,47 +450,52 @@ private fun UploadHistoryRow(record: UploadRecord) {
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(AccentGreen.copy(alpha = 0.15f)),
+                    .background(Color(0xFF34C759).copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Default.CloudUpload,
                     contentDescription = null,
-                    tint = AccentGreen,
+                    tint = Color(0xFF34C759),
                     modifier = Modifier.size(18.dp)
                 )
             }
             Column {
-                Text(record.dateLabel, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text("Uploaded at ${record.timeLabel}", color = TextMuted, fontSize = 12.sp)
+                Text(record.dateLabel, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text("Uploaded at ${record.timeLabel}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }
 
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(AccentGreen.copy(alpha = 0.15f))
+                .clip(ChipShape)
+                .background(Color(0xFF34C759).copy(alpha = 0.15f))
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
             Text(
                 text = "${record.count} video${if (record.count != 1) "s" else ""}",
-                color = AccentGreen,
+                color = Color(0xFF34C759),
                 fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.Bold
             )
         }
     }
 }
 
-// ── Section title ──────────────────────────────────────────────────────────
+// ── Section title ─────────────────────────────────────────────────────────────
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text = text, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    Text(
+        text,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        letterSpacing = 1.2.sp
+    )
 }
 
-
-// ── Hourly views chart ─────────────────────────────────────────────────────
+// ── Hourly views chart ────────────────────────────────────────────────────────
 
 @Composable
 fun HourlyViewsChart(
@@ -434,14 +503,15 @@ fun HourlyViewsChart(
     bestHour: Int?,
     onRefresh: () -> Unit
 ) {
-    val AccentGreen = Color(0xFF4CAF50)
-    val AccentAmber = Color(0xFFFFB300)
-    val BgCard      = Color(0xFF242424)
-    val BgCardAlt   = Color(0xFF2C2C2C)
-    val TextPrimary = Color.White
-    val TextMuted   = Color(0xFF9E9E9E)
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         // Header row
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -450,19 +520,29 @@ fun HourlyViewsChart(
         ) {
             Text(
                 "Views by Upload Hour",
-                color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold
             )
-            TextButton(onClick = onRefresh) {
-                Icon(
-                    Icons.Default.Refresh,
-                    null,
-                    tint = AccentGreen,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Refresh", color = AccentGreen, fontSize = 12.sp)
+            // Refresh button — outlined pill
+            Box(
+                modifier = Modifier
+                    .clip(ChipShape)
+                    .border(1.dp, Color(0xFF34C759).copy(alpha = 0.2f), ChipShape)
+                    .clickable { onRefresh() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Refresh, null,
+                        tint = Color(0xFF34C759),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text("Refresh", color = Color(0xFF34C759), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
             }
         }
 
@@ -470,22 +550,21 @@ fun HourlyViewsChart(
         if (bestHour != null && data.isNotEmpty()) {
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(AccentAmber.copy(alpha = 0.12f))
+                    .clip(ChipShape)
+                    .background(Color(0xFFFFB340).copy(alpha = 0.12f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    Icons.Default.EmojiEvents,
-                    null,
-                    tint = AccentAmber,
+                    Icons.Default.EmojiEvents, null,
+                    tint = Color(0xFFFFB340),
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
                     "Best time: ${String.format("%02d:00", bestHour)} — " +
                     "${data.find { it.hour == bestHour }?.avgViews ?: 0} avg views",
-                    color = AccentAmber,
+                    color = Color(0xFFFFB340),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -493,114 +572,106 @@ fun HourlyViewsChart(
         }
 
         // Chart box
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(BgCard)
-                .padding(16.dp)
-        ) {
-            if (data.isEmpty()) {
-                Box(
+        if (data.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(Icons.Default.BarChart, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                    modifier = Modifier.size(36.dp))
+                Text("No view data yet",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text("Upload a video then tap Refresh — YouTube\ntakes a few hours to report view counts.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp)
+                Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(160.dp),
-                    contentAlignment = Alignment.Center
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF4CAF50).copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.BarChart,
-                            null,
-                            tint = Color(0xFF444444),
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Text(
-                            "No view data yet",
-                            color = TextMuted,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            "Data appears after videos are uploaded\nand views are refreshed",
-                            color = Color(0xFF666666),
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Icon(Icons.Default.Refresh, null,
+                        tint = Color(0xFF4CAF50), modifier = Modifier.size(13.dp))
+                    Text("Tap Refresh above after your first upload",
+                        fontSize = 11.sp, color = Color(0xFF4CAF50),
+                        fontWeight = FontWeight.Medium)
                 }
-            } else {
-                val maxViews = data.maxOfOrNull { it.avgViews } ?: 1L
-                val chartHeight = 160.dp
+            }
+        } else {
+            val maxViews = data.maxOfOrNull { it.avgViews }?.coerceAtLeast(1L) ?: 1L
+            val chartHeight = 160.dp
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(chartHeight),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        data.forEach { hourData ->
-                            val isBest = hourData.hour == bestHour
-                            val fraction = if (maxViews > 0) hourData.avgViews.toFloat() / maxViews else 0f
-                            val animatedFraction by animateFloatAsState(
-                                targetValue = fraction,
-                                animationSpec = tween(700),
-                                label = "hour_bar"
-                            )
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Bottom
-                            ) {
-                                if (hourData.avgViews > 0) {
-                                    Text(
-                                        formatViews(hourData.avgViews),
-                                        color = if (isBest) AccentAmber else AccentGreen,
-                                        fontSize = 7.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                } else {
-                                    Spacer(Modifier.height(14.dp))
-                                }
-                                val barH = (chartHeight - 30.dp) * animatedFraction
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(
-                                            if (hourData.avgViews > 0)
-                                                barH.coerceAtLeast(4.dp)
-                                            else 2.dp
-                                        )
-                                        .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
-                                        .background(
-                                            when {
-                                                isBest -> AccentAmber
-                                                hourData.avgViews > 0 -> AccentGreen
-                                                else -> BgCardAlt
-                                            }
-                                        )
-                                )
-                                Spacer(Modifier.height(4.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(chartHeight),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    data.forEach { hourData ->
+                        val isBest = hourData.hour == bestHour
+                        val fraction = remember(hourData.avgViews, maxViews) {
+                            if (maxViews > 0) hourData.avgViews.toFloat() / maxViews else 0f
+                        }
+                        val animatedFraction by animateFloatAsState(
+                            targetValue = fraction,
+                            animationSpec = tween(700),
+                            label = "hour_bar"
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom
+                        ) {
+                            if (hourData.avgViews > 0) {
                                 Text(
-                                    "${hourData.hour}",
-                                    color = if (isBest) AccentAmber else TextMuted,
-                                    fontSize = 8.sp,
-                                    fontWeight = if (isBest) FontWeight.Bold else FontWeight.Normal
+                                    formatViews(hourData.avgViews),
+                                    color = if (isBest) Color(0xFFFFB340) else Color(0xFF34C759),
+                                    fontSize = 7.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
+                                Spacer(Modifier.height(2.dp))
+                            } else {
+                                Spacer(Modifier.height(14.dp))
                             }
+                            val barH = (chartHeight - 30.dp) * animatedFraction
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(if (hourData.avgViews > 0) barH.coerceAtLeast(4.dp) else 2.dp)
+                                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                                    .background(
+                                        when {
+                                            isBest -> Color(0xFFFFB340)
+                                            hourData.avgViews > 0 -> Color(0xFF34C759)
+                                            else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                                        }
+                                    )
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "${hourData.hour}",
+                                color = if (isBest) Color(0xFFFFB340) else MaterialTheme.colorScheme.outline,
+                                fontSize = 8.sp,
+                                fontWeight = if (isBest) FontWeight.Bold else FontWeight.Normal
+                            )
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Hour (0–23)", color = TextMuted, fontSize = 9.sp)
-                        Text("Avg views per video", color = TextMuted, fontSize = 9.sp)
-                    }
+                }
+                // Baseline rule
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), thickness = 1.dp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Hour (0–23)", color = MaterialTheme.colorScheme.outline, fontSize = 9.sp)
+                    Text("Avg views per video", color = MaterialTheme.colorScheme.outline, fontSize = 9.sp)
                 }
             }
         }

@@ -6,19 +6,22 @@ import com.jbr.shortsforge.data.database.dao.MoodConfigDao
 import com.jbr.shortsforge.data.database.dao.ProfileDao
 import com.jbr.shortsforge.data.database.dao.ProjectDao
 import com.jbr.shortsforge.data.database.dao.ProjectImageDao
+import com.jbr.shortsforge.data.database.dao.VideoTemplateDao
 import com.jbr.shortsforge.data.model.MoodConfig
 import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.model.ProjectEntity
 import com.jbr.shortsforge.data.model.ProjectImageEntity
+import com.jbr.shortsforge.data.model.VideoTemplate
 
 @Database(
     entities = [
         ProjectEntity::class,
         ProjectImageEntity::class,
         ProfileEntity::class,
-        MoodConfig::class            // NEW
+        MoodConfig::class,
+        VideoTemplate::class         // NEW — video templates
     ],
-    version = 6,                      // bumped from 5 → 6 (added hour/minute props to MoodConfig)
+    version = 9,                      // bumped from 8 → 9 (added six_hourly_upload_enabled)
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,4 +29,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun projectImageDao(): ProjectImageDao
     abstract fun profileDao(): ProfileDao
     abstract fun moodConfigDao(): MoodConfigDao
+    abstract fun videoTemplateDao(): VideoTemplateDao
 }

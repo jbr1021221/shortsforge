@@ -39,7 +39,11 @@ data class DashboardUiState(
     // Hourly view performance data
     val hourlyViewData: List<HourlyViewData> = emptyList(),
     val bestUploadHour: Int? = null,
-    val totalTrackedVideos: Int = 0
+    val totalTrackedVideos: Int = 0,
+    
+    // Image cooldown stats
+    val imageCooldownEnabled: Boolean = false,
+    val imageCooldownDays: Int = 7
 )
 
 @HiltViewModel
@@ -77,6 +81,7 @@ class DashboardViewModel @Inject constructor(
 
             val nextTime = when {
                 !settings.autoUploadEnabled -> "Disabled"
+                settings.biHourlyUploadEnabled -> "Every 2 hours"
                 settings.hourlyUploadEnabled -> "Every hour"
                 else -> String.format("%02d:%02d", settings.autoUploadHour, settings.autoUploadMinute)
             }
@@ -93,7 +98,9 @@ class DashboardViewModel @Inject constructor(
                 streak = streak,
                 hourlyViewData = hourlyData,
                 bestUploadHour = bestHour,
-                totalTrackedVideos = trackedVideos
+                totalTrackedVideos = trackedVideos,
+                imageCooldownEnabled = settings.imageCooldownEnabled,
+                imageCooldownDays = settings.imageCooldownDays
             )
         }
     }

@@ -20,6 +20,7 @@ import com.jbr.shortsforge.data.preferences.AppSettingsRepository
 import com.jbr.shortsforge.data.preferences.FolderPreferencesRepository
 import com.jbr.shortsforge.data.preferences.PlatformCredentialsRepository
 import com.jbr.shortsforge.data.repository.ImageRepository
+import com.jbr.shortsforge.data.repository.ProfileRepository
 import com.jbr.shortsforge.data.repository.VideoStatsRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -35,6 +36,7 @@ class AutoUploadWorker @AssistedInject constructor(
     private val musicManager: MusicManager,
     private val folderPrefs: FolderPreferencesRepository,
     private val settingsRepository: AppSettingsRepository,
+    private val profileRepository: ProfileRepository,           // ← ADDED
     private val videoStatsRepository: VideoStatsRepository,
     private val platformCredentialsRepository: PlatformCredentialsRepository
 ) : CoroutineWorker(context, workerParams) {
@@ -63,22 +65,32 @@ class AutoUploadWorker @AssistedInject constructor(
         }
 
         return try {
-            // 1. Read settings + platform credentials
+            // ── 1. Read global settings + active profile ─────────────────────
             val settings = settingsRepository.settingsFlow.first()
             val platformCreds = platformCredentialsRepository.credentialsFlow.first()
 
-            // 2. Resolve YouTube email — saved email is required for background work.
-            //    GoogleAuthManager.getAccount() can return null in background on Android 10+,
-            //    so we always persist the email when the user links their account in the UI.
-            var ytEmail = settings.ytAccountEmail.trim()
+            // FIX: Always load the active profile so we use per-profile values
+            // (folder, title, YouTube email) instead of stale global settings.
+            val activeProfile = profileRepository.activeProfile.first()
+            Log.d(TAG, "Active profile: ${activeProfile?.id} / ${activeProfile?.name}")
+
+            // ── 2. Resolve YouTube email ──────────────────────────────────────
+            // Priority: profile email → global settings email → GoogleSignIn fallback
+            var ytEmail = activeProfile?.ytAccountEmail?.trim()
+                ?.ifBlank { null }
+                ?: settings.ytAccountEmail.trim()
 
             if (ytEmail.isBlank()) {
-                // One-time self-heal fallback for users who linked before email was persisted
+                // Last-resort: GoogleSignIn cache (only works if app was recently open)
                 val fallbackAccount = GoogleAuthManager.getAccount(applicationContext)
                 if (fallbackAccount?.email != null) {
                     ytEmail = fallbackAccount.email!!
+                    // Persist so future background runs don't need GoogleSignIn
                     settingsRepository.updateYtAccountEmail(ytEmail)
-                    Log.d(TAG, "Self-heal: saved YT email $ytEmail for future background runs")
+                    activeProfile?.let {
+                        profileRepository.updateYouTube(it.id, ytEmail, fallbackAccount.displayName ?: "")
+                    }
+                    Log.d(TAG, "Self-heal: saved YT email $ytEmail")
                 } else {
                     showResultNotification(
                         "❌ Auto-Upload Failed",
@@ -90,27 +102,44 @@ class AutoUploadWorker @AssistedInject constructor(
 
             Log.d(TAG, "Using YT email: $ytEmail")
 
-            // 3. Get folder and images
-            val folderUriString = folderPrefs.folderUriFlow.first() ?: run {
-                showResultNotification("❌ Auto-Upload Failed", "No folder selected.")
-                return Result.failure()
-            }
+            // ── 3. Resolve folder URI ─────────────────────────────────────────
+            // FIX: Check profile folder first, then fall back to global folder prefs.
+            val folderUriString =
+                activeProfile?.folderUri?.takeIf { it.isNotBlank() }
+                    ?: folderPrefs.folderUriFlow.first()
+                    ?: run {
+                        showResultNotification(
+                            "❌ Auto-Upload Failed",
+                            "No image folder selected. Open the app → Settings → select folder."
+                        )
+                        return Result.failure()
+                    }
+
             val folderUri = Uri.parse(folderUriString)
+            Log.d(TAG, "Using folder: $folderUriString")
+
+            // ── 4. Scan images ────────────────────────────────────────────────
             val images = imageRepository.scanFolder(folderUri)
             if (images.isEmpty()) {
-                showResultNotification("❌ Auto-Upload Failed", "No images found in folder.")
+                showResultNotification("❌ Auto-Upload Failed", "No images found in selected folder.")
                 return Result.failure()
             }
 
-            // 4. Generate slides
+            // ── 5. Generate slides ────────────────────────────────────────────
             updateForeground("Generating video slides...")
-            val slides = autoGenerateEngine.generateShort(images)
+            // FIX: If a profile exists, use profile-specific settings (filter, transition, etc.)
+            val slides = if (activeProfile != null) {
+                autoGenerateEngine.generateShortForProfile(applicationContext, images, activeProfile)
+            } else {
+                autoGenerateEngine.generateShort(applicationContext, images)
+            }
+
             if (slides.isEmpty()) {
                 showResultNotification("❌ Auto-Upload Failed", "Could not generate slides.")
                 return Result.failure()
             }
 
-            // 5. Music selection — random track + random start position
+            // ── 6. Music selection ────────────────────────────────────────────
             val availableMusic = musicManager.scanMusicFolder(folderUri)
             val musicSettings = if (availableMusic.isNotEmpty()) {
                 val randomMusic = availableMusic.random()
@@ -127,7 +156,7 @@ class AutoUploadWorker @AssistedInject constructor(
                 )
             } else MusicSettings(isMusicEnabled = false)
 
-            // 6. Export video
+            // ── 7. Export video ───────────────────────────────────────────────
             updateForeground("Exporting video...")
             val exportResult = videoExporter.exportVideoSuspend(
                 slides = slides,
@@ -140,17 +169,19 @@ class AutoUploadWorker @AssistedInject constructor(
                 return Result.failure()
             }
 
-            // 7. Determine video title
-            val videoTitle = settings.autoUploadTitle
-                .trim()
-                .ifBlank {
-                    slides.find { it.overlayText.isNotBlank() }?.overlayText ?: "Daily Short"
-                }
+            // ── 8. Resolve video title ────────────────────────────────────────
+            // FIX: Read title from profile first, then global settings, then slide text.
+            val videoTitle = (activeProfile?.autoUploadTitle?.trim()
+                ?.ifBlank { null }
+                ?: settings.autoUploadTitle.trim()
+                    .ifBlank { null }
+                ?: slides.find { it.overlayText.isNotBlank() }?.overlayText
+                ?: "Daily Short")
                 .take(100)
 
             Log.d(TAG, "Video title: \"$videoTitle\"")
 
-            // 8. Upload to YouTube
+            // ── 9. Upload to YouTube ──────────────────────────────────────────
             updateForeground("Uploading to YouTube...")
             var youtubeSuccess = false
             var uploadedVideoId: String? = null
@@ -175,7 +206,7 @@ class AutoUploadWorker @AssistedInject constructor(
                 Log.e(TAG, "YouTube upload exception: ${e.message}")
             }
 
-            // 9. Upload to FB / Instagram / TikTok in parallel
+            // ── 10. Upload to FB / Instagram / TikTok ────────────────────────
             val anyPlatformConnected = platformCreds.isFacebookConnected ||
                     platformCreds.isInstagramConnected ||
                     platformCreds.isTikTokConnected
@@ -193,9 +224,10 @@ class AutoUploadWorker @AssistedInject constructor(
                 results
             } else emptyList()
 
-            // 10. Clean up temp file
+            // ── 11. Clean up temp export file ─────────────────────────────────
             if (exportResult.exists()) exportResult.delete()
 
+            // ── 12. Record result and notify ──────────────────────────────────
             if (youtubeSuccess) {
                 uploadedVideoId?.let { videoId ->
                     videoStatsRepository.saveUploadedVideo(videoId, uploadHour)
@@ -208,23 +240,20 @@ class AutoUploadWorker @AssistedInject constructor(
                 showResultNotification("🚀 Short Uploaded!", "\"$videoTitle\" is live on YouTube!")
                 Result.success()
             } else {
-                // Still record a failed YouTube attempt so the user can see it in History
                 recordUploadHistory(
                     videoTitle = videoTitle,
                     youtubeSuccess = false,
                     platformResults = socialResults
                 )
                 showResultNotification("❌ YouTube Upload Failed", "Check your internet and try again.")
-                // Return retry so WorkManager attempts again with backoff before next periodic run
                 Result.retry()
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Worker crashed", e)
             showResultNotification("❌ Auto-Upload Failed", "Unexpected error. Will retry.")
-            Result.retry()  // retry instead of failure so it doesn't silently die
+            Result.retry()
         }
-        // NOTE: No manual rescheduling needed — PeriodicWork handles the 24h cycle automatically.
     }
 
     private fun recordUploadHistory(
@@ -238,7 +267,6 @@ class AutoUploadWorker @AssistedInject constructor(
             )
             val now = System.currentTimeMillis()
 
-            // ── Build platform list ───────────────────────────────────────────
             val platformsJson = org.json.JSONArray().apply {
                 put(org.json.JSONObject().apply {
                     put("name", "YouTube")
@@ -252,7 +280,6 @@ class AutoUploadWorker @AssistedInject constructor(
                 }
             }
 
-            // ── Append new record to records_v2 ───────────────────────────────
             val existing = prefs.getString("records_v2", "[]") ?: "[]"
             val arr = org.json.JSONArray(existing)
             arr.put(org.json.JSONObject().apply {
@@ -261,7 +288,6 @@ class AutoUploadWorker @AssistedInject constructor(
                 put("platforms", platformsJson)
             })
 
-            // ── Also update legacy records for DashboardScreen backward compat ─
             val dateFmt = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
             val timeFmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
             val dateLabel = dateFmt.format(java.util.Date(now))

@@ -121,7 +121,7 @@ class ProfileWorker @AssistedInject constructor(
 
             // 5. Generate slides using profile-specific settings
             updateForeground(profileId, "Generating slides for ${profile.name}...")
-            val slides = autoGenerateEngine.generateShortForProfile(images, profile)
+            val slides = autoGenerateEngine.generateShortForProfile(applicationContext, images, profile)
             if (slides.isEmpty()) {
                 showResultNotification(profileId, profile.name,
                     "❌ Upload Failed", "Could not generate slides for ${profile.name}")
@@ -277,8 +277,12 @@ class ProfileWorker @AssistedInject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "ProfileWorker crashed [${profile.name}]", e)
             showResultNotification(profileId, profile.name,
-                "❌ Error", "Unexpected error for ${profile.name}")
-            return Result.failure()
+                "❌ Error", "Unexpected error — will retry automatically")
+            // BUG FIX C: Return retry() NOT failure().
+            // failure() tells WorkManager this job is permanently broken — it stops
+            // scheduling it forever. retry() keeps the periodic window alive so the
+            // next scheduled run still fires normally.
+            return Result.retry()
         }
     }
 

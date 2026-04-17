@@ -9,9 +9,11 @@ import androidx.lifecycle.viewModelScope
 import com.jbr.shortsforge.data.model.ImageItem
 import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.model.ProjectEntity
+import com.jbr.shortsforge.data.model.UnsplashPhoto
 import com.jbr.shortsforge.data.repository.ProfileRepository
 import com.jbr.shortsforge.data.repository.ProjectRepository
 import com.jbr.shortsforge.data.repository.ImageRepository
+import com.jbr.shortsforge.data.repository.UnsplashRepository
 import com.jbr.shortsforge.engine.AutoGenerateEngine
 import com.jbr.shortsforge.data.model.SlideItem
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,7 +40,8 @@ class HomeViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val imageRepository: ImageRepository,
     private val projectRepository: ProjectRepository,
-    private val autoGenerateEngine: AutoGenerateEngine
+    private val autoGenerateEngine: AutoGenerateEngine,
+    private val unsplashRepository: UnsplashRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -170,7 +173,30 @@ class HomeViewModel @Inject constructor(
         if (currentImages.isEmpty()) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val slides = autoGenerateEngine.generateShort(currentImages)
+            val slides = autoGenerateEngine.generateShort(context, currentImages)
+            _uiState.value = _uiState.value.copy(isLoading = false)
+            _navigationEvent.emit(slides)
+        }
+    }
+
+    fun onUnsplashCreate(photos: List<UnsplashPhoto>) {
+        if (photos.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            val images = withContext(Dispatchers.IO) {
+                photos.mapNotNull { photo ->
+                    unsplashRepository.downloadToCache(context, photo)?.let { file ->
+                        ImageItem(
+                            id           = "unsplash_${photo.id}",
+                            uri          = Uri.fromFile(file),
+                            fileName     = "${photo.id}.jpg",
+                            dateModified = file.lastModified()
+                        )
+                    }
+                }
+            }
+            if (images.isEmpty()) { _uiState.value = _uiState.value.copy(isLoading = false); return@launch }
+            val slides = autoGenerateEngine.generateShort(context, images)
             _uiState.value = _uiState.value.copy(isLoading = false)
             _navigationEvent.emit(slides)
         }
@@ -187,7 +213,7 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.value = current.copy(isLoading = true)
-            val slides = autoGenerateEngine.generateShort(selectedImages)
+            val slides = autoGenerateEngine.generateShort(context, selectedImages)
             _uiState.value = _uiState.value.copy(
                 isLoading = false,
                 isSelectionMode = false,

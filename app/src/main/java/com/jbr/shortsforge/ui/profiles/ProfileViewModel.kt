@@ -139,12 +139,15 @@ class ProfileViewModel @Inject constructor(
 
     // ── Schedule ──────────────────────────────────────────────────────────
 
-    fun updateSchedule(profileId: Long, enabled: Boolean, hour: Int, minute: Int, hourly: Boolean) {
+    fun updateSchedule(profileId: Long, enabled: Boolean, hour: Int, minute: Int, hourly: Boolean, biHourly: Boolean = false) {
         viewModelScope.launch {
-            profileRepository.updateSchedule(profileId, enabled, hour, minute, hourly)
+            profileRepository.updateSchedule(profileId, enabled, hour, minute, hourly, biHourly)
             if (enabled) {
-                if (hourly) ProfileScheduler.scheduleHourly(context, profileId)
-                else ProfileScheduler.scheduleDaily(context, profileId, hour, minute)
+                when {
+                    biHourly -> ProfileScheduler.scheduleBiHourly(context, profileId)
+                    hourly -> ProfileScheduler.scheduleHourly(context, profileId)
+                    else -> ProfileScheduler.scheduleDaily(context, profileId, hour, minute)
+                }
             } else {
                 ProfileScheduler.cancel(context, profileId)
             }

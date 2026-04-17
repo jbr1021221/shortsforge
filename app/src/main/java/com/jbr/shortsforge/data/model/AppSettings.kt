@@ -16,6 +16,18 @@ data class AppSettings(
     val autoUploadHour: Int = 10,
     val autoUploadMinute: Int = 0,
     val hourlyUploadEnabled: Boolean = false,
+    val biHourlyUploadEnabled: Boolean = false,
+    val sixHourlyUploadEnabled: Boolean = false,
     val autoUploadTitle: String = "",
-    val ytAccountEmail: String = ""   // saved so background worker doesn't need live GoogleSignIn
+    val ytAccountEmail: String = "",   // saved so background worker doesn't need live GoogleSignIn
+
+    // ── Image Cooldown ─────────────────────────────────────────────────────
+    val imageCooldownEnabled: Boolean = false,
+    val imageCooldownDays: Int = 7,     // 1 – 30 days
+
+    // ── Templates ─────────────────────────────────────────────────────────
+    val defaultTemplateId: Long? = null,  // null = no default template
+
+    // ── Unsplash ───────────────────────────────────────────────────────────
+    val unsplashEnabled: Boolean = true
 )
