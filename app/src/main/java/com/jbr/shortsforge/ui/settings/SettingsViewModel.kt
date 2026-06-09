@@ -67,11 +67,28 @@ class SettingsViewModel @Inject constructor(
 
     fun updateVideoDuration(value: Int) {
         viewModelScope.launch {
-            repository.updateVideoDuration(value)
+            val duration = value.coerceIn(30, 60)
+            repository.updateVideoDuration(duration)
             activeProfile.value?.let { profile ->
-                profileRepository.updateProfile(profile.copy(videoDuration = value))
+                profileRepository.updateProfile(profile.copy(videoDuration = duration))
             }
-            _message.emit("Set to ${value}s per short.")
+            _message.emit("Set to ${duration}s per short.")
+        }
+    }
+
+    fun updateUploadSourceMode(mode: String) {
+        viewModelScope.launch {
+            val normalized = if (mode == "videos") "videos" else "images"
+            activeProfile.value?.let { profile ->
+                profileRepository.updateUploadSourceMode(profile.id, normalized)
+            }
+            _message.emit(
+                if (normalized == "videos") {
+                    "Auto-upload will use videos from a child folder named video or videos."
+                } else {
+                    "Auto-upload will generate videos from images."
+                }
+            )
         }
     }
 
@@ -228,7 +245,11 @@ class SettingsViewModel @Inject constructor(
                         Log.d("SettingsVM", "Rescheduled bi-hourly for profile ${updatedProfile.id}")
                     }
                     updatedProfile.hourlyUploadEnabled -> {
-                        ProfileScheduler.scheduleHourly(context, updatedProfile.id)
+                        ProfileScheduler.scheduleHourly(
+                            context,
+                            updatedProfile.id,
+                            policy = ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+                        )
                         Log.d("SettingsVM", "Rescheduled hourly for profile ${updatedProfile.id}")
                     }
                     else -> {

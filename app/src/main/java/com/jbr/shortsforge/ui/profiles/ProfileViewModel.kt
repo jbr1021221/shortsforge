@@ -3,6 +3,8 @@ package com.jbr.shortsforge.ui.profiles
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingPeriodicWorkPolicy
+import com.jbr.shortsforge.data.model.EditingMode
 import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.repository.ProfileRepository
 import com.jbr.shortsforge.engine.FacebookUploadManager
@@ -48,6 +50,12 @@ class ProfileViewModel @Inject constructor(
 
     fun renameProfile(profile: ProfileEntity, newName: String) {
         viewModelScope.launch { profileRepository.updateProfile(profile.copy(name = newName)) }
+    }
+
+    fun updateEditingMode(profile: ProfileEntity, editingMode: EditingMode) {
+        viewModelScope.launch {
+            profileRepository.updateProfile(profile.copy(editingMode = editingMode))
+        }
     }
 
     // ── Folder ────────────────────────────────────────────────────────────
@@ -139,18 +147,74 @@ class ProfileViewModel @Inject constructor(
 
     // ── Schedule ──────────────────────────────────────────────────────────
 
-    fun updateSchedule(profileId: Long, enabled: Boolean, hour: Int, minute: Int, hourly: Boolean, biHourly: Boolean = false) {
+    fun updateSchedule(profileId: Long, enabled: Boolean, hour: Int, minute: Int, hourly: Boolean, biHourly: Boolean = false, sixHourly: Boolean = false) {
         viewModelScope.launch {
-            profileRepository.updateSchedule(profileId, enabled, hour, minute, hourly, biHourly)
-            if (enabled) {
-                when {
-                    biHourly -> ProfileScheduler.scheduleBiHourly(context, profileId)
-                    hourly -> ProfileScheduler.scheduleHourly(context, profileId)
-                    else -> ProfileScheduler.scheduleDaily(context, profileId, hour, minute)
-                }
-            } else {
-                ProfileScheduler.cancel(context, profileId)
+            profileRepository.updateSchedule(profileId, enabled, hour, minute, hourly, biHourly, sixHourly)
+            applySchedule(profileId, enabled, hour, minute, hourly, biHourly, sixHourly)
+        }
+    }
+
+    fun saveScheduleAndEditingMode(
+        profileId: Long,
+        enabled: Boolean,
+        hour: Int,
+        minute: Int,
+        hourly: Boolean,
+        biHourly: Boolean = false,
+        sixHourly: Boolean = false,
+        editingMode: EditingMode
+    ) {
+        viewModelScope.launch {
+            profileRepository.updateScheduleAndEditingMode(
+                profileId = profileId,
+                enabled = enabled,
+                hour = hour,
+                minute = minute,
+                hourly = hourly,
+                biHourly = biHourly,
+                sixHourly = sixHourly,
+                editingMode = editingMode
+            )
+            applySchedule(profileId, enabled, hour, minute, hourly, biHourly, sixHourly)
+        }
+    }
+
+    private fun applySchedule(
+        profileId: Long,
+        enabled: Boolean,
+        hour: Int,
+        minute: Int,
+        hourly: Boolean,
+        biHourly: Boolean,
+        sixHourly: Boolean
+    ) {
+        if (enabled) {
+            when {
+                sixHourly -> ProfileScheduler.scheduleSixHourly(
+                    context,
+                    profileId,
+                    ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+                )
+                biHourly -> ProfileScheduler.scheduleBiHourly(
+                    context,
+                    profileId,
+                    ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+                )
+                hourly -> ProfileScheduler.scheduleHourly(
+                    context,
+                    profileId,
+                    policy = ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+                )
+                else -> ProfileScheduler.scheduleDaily(
+                    context,
+                    profileId,
+                    hour,
+                    minute,
+                    ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+                )
             }
+        } else {
+            ProfileScheduler.cancel(context, profileId)
         }
     }
 

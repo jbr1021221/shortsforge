@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -61,8 +62,9 @@ private val SettingsChipShape     = RoundedCornerShape(50.dp)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
-    themeViewModel: ThemeViewModel,                     // passed from NavGraph
-    onNavigateBack: () -> Unit
+    themeViewModel: ThemeViewModel,
+    onNavigateBack: () -> Unit,
+    onSignOut: () -> Unit = {}
 ) {
     val settings      by viewModel.settings.collectAsStateWithLifecycle()
     val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
@@ -76,6 +78,7 @@ fun SettingsScreen(
     var showAutoUploadTimePicker by remember { mutableStateOf(false) }
     var showFbDialog             by remember { mutableStateOf(false) }
     var showTikTokDialog         by remember { mutableStateOf(false) }
+    var showRemoveAccountDialog  by remember { mutableStateOf(false) }
     var platformError            by remember { mutableStateOf<String?>(null) }
     
     // ── Local state for TextFields to prevent "clearing while typing" ─────────
@@ -535,8 +538,13 @@ fun SettingsScreen(
 
                     GlassSection(title = "Video Generation") {
                         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                            UploadSourceSelector(
+                                selectedMode = activeProfile?.uploadSourceMode ?: "images",
+                                enabled = activeProfile != null,
+                                onModeSelected = { viewModel.updateUploadSourceMode(it) }
+                            )
                             SliderSetting("Images per short", settings.imagesPerShort.toFloat(), 3f..8f, 4) { viewModel.updateImagesPerShort(it.toInt()) }
-                            SliderSetting("Duration (seconds)", settings.videoDuration.toFloat(), 10f..30f, 19) { viewModel.updateVideoDuration(it.toInt()) }
+                            SliderSetting("Duration (seconds)", settings.videoDuration.coerceIn(30, 60).toFloat(), 30f..60f, 29) { viewModel.updateVideoDuration(it.toInt()) }
                             DropdownSetting("Aspect ratio", settings.aspectRatio, listOf("9:16", "1:1", "16:9")) { viewModel.updateAspectRatio(it) }
                             DropdownSetting("Default transition", settings.defaultTransition, listOf("Random", "Fade", "Slide", "Zoom", "Dissolve")) { viewModel.updateDefaultTransition(it) }
                             DropdownSetting("Default filter", settings.defaultFilter, listOf("Random", "None", "Vintage", "B&W", "Warm", "Cool")) { viewModel.updateDefaultFilter(it) }
@@ -797,6 +805,28 @@ fun SettingsScreen(
                         }
                     }
 
+                    // Remove app account from this device
+                    GlassSection(title = "Account") {
+                        OutlinedButton(
+                            onClick = { showRemoveAccountDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Remove Account", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                        }
+                    }
+
                     Spacer(Modifier.height(16.dp))
                 }
             }
@@ -804,6 +834,40 @@ fun SettingsScreen(
     }
 
     // ── Dialogs ────────────────────────────────────────────────────────────
+
+    if (showRemoveAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveAccountDialog = false },
+            icon = {
+                Icon(
+                    Icons.AutoMirrored.Filled.Logout,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = { Text("Remove account?") },
+            text = {
+                Text(
+                    "This removes your ShortsForge account from this device. Your cloud account and synced data will not be deleted."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRemoveAccountDialog = false
+                        onSignOut()
+                    }
+                ) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveAccountDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     if (showTimePicker) {
         val state = rememberTimePickerState(settings.reminderHour, settings.reminderMinute, true)
@@ -1531,6 +1595,57 @@ private fun SliderSetting(
                 activeTrackColor = MaterialTheme.colorScheme.primary,
                 inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant
             )
+        )
+    }
+}
+
+@Composable
+private fun UploadSourceSelector(
+    selectedMode: String,
+    enabled: Boolean,
+    onModeSelected: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Auto-upload source",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(
+                Triple("images", Icons.Default.PhotoLibrary, "Images"),
+                Triple("videos", Icons.Default.Movie, "Videos")
+            ).forEach { (mode, icon, label) ->
+                val selected = selectedMode == mode
+                FilterChip(
+                    selected = selected,
+                    enabled = enabled,
+                    onClick = { onModeSelected(mode) },
+                    label = {
+                        Text(
+                            label,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Text(
+            if (selectedMode == "videos") {
+                "Uses videos from a child folder named \"video\" or \"videos\" inside the selected root folder."
+            } else {
+                "Uses images from the selected root folder and generates a video."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

@@ -39,6 +39,14 @@ class MoodViewModel @Inject constructor(
         }
     }
 
+    /** Update the source video folder for clip-based mood videos. */
+    fun updateVideoFolder(mood: VideoMood, folderUri: String) {
+        viewModelScope.launch {
+            val cfg = moodRepository.getOrDefault(mood)
+            moodRepository.save(cfg.copy(videoFolderUri = folderUri))
+        }
+    }
+
     /** Update the music folder for a mood. */
     fun updateMusicFolder(mood: VideoMood, folderUri: String) {
         viewModelScope.launch {

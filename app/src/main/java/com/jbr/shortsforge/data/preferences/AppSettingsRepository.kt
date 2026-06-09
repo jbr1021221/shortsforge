@@ -46,7 +46,7 @@ class AppSettingsRepository @Inject constructor(
     val settingsFlow: Flow<AppSettings> = dataStore.data.map { prefs ->
         AppSettings(
             imagesPerShort = prefs[Keys.IMAGES_PER_SHORT] ?: 5,
-            videoDuration = prefs[Keys.VIDEO_DURATION] ?: 15,
+            videoDuration = prefs[Keys.VIDEO_DURATION] ?: 30,
             aspectRatio = prefs[Keys.ASPECT_RATIO] ?: "9:16",
             defaultTransition = prefs[Keys.DEFAULT_TRANSITION] ?: "Random",
             defaultFilter = prefs[Keys.DEFAULT_FILTER] ?: "Random",

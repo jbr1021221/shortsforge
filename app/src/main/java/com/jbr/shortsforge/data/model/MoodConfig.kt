@@ -123,6 +123,7 @@ enum class VideoMood(
  * Stores the per-mood folder configuration in Room.
  * Each mood has:
  *  - imagesFolderUri  → folder containing images for that mood
+ *  - videoFolderUri   → folder containing source videos for clip-based mood shorts
  *  - musicFolderUri   → folder containing background music for that mood
  *  - customQuotes     → pipe-separated list of user quotes (overrides defaults when non-empty)
  *  - dayOfWeek        → which day 1–7 this mood fires (can be customized by user)
@@ -134,6 +135,7 @@ data class MoodConfig(
     val mood: String,              // VideoMood.name
 
     val imagesFolderUri: String = "",
+    val videoFolderUri: String  = "",
     val musicFolderUri: String  = "",
     val customQuotes: String    = "",   // pipe-separated: "quote1|quote2|..."
 

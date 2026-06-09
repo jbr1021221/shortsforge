@@ -9,6 +9,7 @@ import androidx.navigation.navArgument
 import com.jbr.shortsforge.data.model.MusicSettings
 import com.jbr.shortsforge.data.model.SlideItem
 import com.jbr.shortsforge.ui.export.ExportScreen
+import com.jbr.shortsforge.ui.screens.AllPhotosScreen
 import com.jbr.shortsforge.ui.screens.DashboardScreen
 import com.jbr.shortsforge.ui.screens.EditorScreen
 import com.jbr.shortsforge.ui.screens.HistoryScreen
@@ -16,6 +17,8 @@ import com.jbr.shortsforge.ui.screens.HomeScreen
 import com.jbr.shortsforge.ui.screens.MoodSetupScreen
 import com.jbr.shortsforge.ui.screens.PreviewScreen
 import com.jbr.shortsforge.ui.screens.ProfilesScreen
+import com.jbr.shortsforge.ui.auth.LoginScreen
+import com.jbr.shortsforge.ui.auth.AuthViewModel
 import com.jbr.shortsforge.ui.screens.SettingsScreen
 import com.jbr.shortsforge.ui.screens.TemplateLibraryScreen
 import com.jbr.shortsforge.ui.templates.TemplatesViewModel
@@ -27,20 +30,33 @@ import java.nio.charset.StandardCharsets
 @Composable
 fun ShortsForgeNavGraph(
     navController: NavHostController,
-    themeViewModel: ThemeViewModel          // passed from MainActivity
+    themeViewModel: ThemeViewModel
 ) {
+    val authViewModel: AuthViewModel = hiltViewModel()
+    val startDestination = if (authViewModel.isSignedIn) Screen.Home.route else "login"
+
     NavHost(
         navController    = navController,
-        startDestination = Screen.Home.route
+        startDestination = startDestination
     ) {
+        composable(route = "login") {
+            LoginScreen(
+                onAuthSuccess = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo("login") { inclusive = true }
+                    }
+                }
+            )
+        }
         composable(route = Screen.Home.route) {
             HomeScreen(
-                onSettingsClick   = { navController.navigate(Screen.Settings.route) },
-                onDashboardClick  = { navController.navigate("dashboard") },
-                onHistoryClick    = { navController.navigate("history") },
-                onProfilesClick   = { navController.navigate("profiles") },
-                onMoodSetupClick  = { navController.navigate("mood_setup") },
-                onTemplatesClick  = { navController.navigate("template_library") },
+                onSettingsClick    = { navController.navigate(Screen.Settings.route) },
+                onDashboardClick   = { navController.navigate("dashboard") },
+                onHistoryClick     = { navController.navigate("history") },
+                onProfilesClick    = { navController.navigate("profiles") },
+                onMoodSetupClick   = { navController.navigate("mood_setup") },
+                onTemplatesClick   = { navController.navigate("template_library") },
+                onSeeAllPhotosClick = { navController.navigate("all_photos") },
                 onNavigateToEditor = { slides ->
                     navController.currentBackStackEntry
                         ?.savedStateHandle?.set("slides", slides)
@@ -117,12 +133,32 @@ fun ShortsForgeNavGraph(
         composable(route = Screen.Settings.route) {
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                themeViewModel = themeViewModel          // ← NEW
+                themeViewModel = themeViewModel,
+                onSignOut = {
+                    authViewModel.signOut()
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
 
         composable(route = "dashboard") {
-            DashboardScreen(onNavigateBack = { navController.popBackStack() })
+            DashboardScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToAllPhotos = { navController.navigate("all_photos") }
+            )
+        }
+
+        composable(route = "all_photos") {
+            AllPhotosScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToEditor = { slides ->
+                    navController.currentBackStackEntry
+                        ?.savedStateHandle?.set("slides", slides)
+                    navController.navigate(Screen.Editor.route)
+                }
+            )
         }
 
         composable(route = "profiles") {

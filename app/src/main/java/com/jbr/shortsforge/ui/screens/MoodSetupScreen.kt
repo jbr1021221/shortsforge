@@ -226,6 +226,10 @@ fun MoodSetupScreen(
                         viewModel.updateImagesFolder(mood, uri)
                         scope.launch { snackbar.showSnackbar("${mood.emoji} Images folder set!") }
                     },
+                    onVideoFolder = { uri ->
+                        viewModel.updateVideoFolder(mood, uri)
+                        scope.launch { snackbar.showSnackbar("${mood.emoji} Video folder set!") }
+                    },
                     onMusicFolder = { uri ->
                         viewModel.updateMusicFolder(mood, uri)
                         scope.launch { snackbar.showSnackbar("${mood.emoji} Music folder set!") }
@@ -276,6 +280,7 @@ private fun MoodCard(
     isExpanded: Boolean,
     onToggle: () -> Unit,
     onImagesFolder: (String) -> Unit,
+    onVideoFolder: (String) -> Unit,
     onMusicFolder: (String) -> Unit,
     onDayChanged: (Int) -> Unit,
     onQuotesChanged: (List<String>) -> Unit,
@@ -301,6 +306,15 @@ private fun MoodCard(
             context.contentResolver.takePersistableUriPermission(
                 it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             onMusicFolder(it.toString())
+        }
+    }
+    val videoFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            onVideoFolder(it.toString())
         }
     }
 
@@ -351,6 +365,7 @@ private fun MoodCard(
                 // Status dots
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     StatusDot(filled = config?.imagesFolderUri?.isNotBlank() == true, color = color, label = "IMG")
+                    StatusDot(filled = config?.videoFolderUri?.isNotBlank() == true, color = color, label = "VID")
                     StatusDot(filled = config?.musicFolderUri?.isNotBlank() == true, color = color, label = "♪")
                     StatusDot(filled = config?.customQuotes?.isNotBlank() == true, color = color, label = "Q")
                 }
@@ -401,6 +416,13 @@ private fun MoodCard(
                         folderUri = config?.imagesFolderUri ?: "",
                         color = color,
                         onPick = { imagesFolderLauncher.launch(null) }
+                    )
+
+                    FolderRow(
+                        label = "🎬 Video Folder",
+                        folderUri = config?.videoFolderUri ?: "",
+                        color = color,
+                        onPick = { videoFolderLauncher.launch(null) }
                     )
 
                     // Music folder

@@ -14,6 +14,8 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import androidx.work.ExistingPeriodicWorkPolicy
+import com.jbr.shortsforge.data.firebase.CloudSync
+import com.jbr.shortsforge.data.firebase.FirebaseAuthRepository
 import com.jbr.shortsforge.data.preferences.AppSettingsRepository
 import com.jbr.shortsforge.data.repository.ProfileRepository
 import com.jbr.shortsforge.engine.AutoUploadScheduler
@@ -37,6 +39,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var profileRepository: ProfileRepository
     @Inject lateinit var moodRepository: com.jbr.shortsforge.data.repository.MoodRepository
     @Inject lateinit var moodScheduler: com.jbr.shortsforge.engine.MoodScheduler
+    @Inject lateinit var firebaseAuthRepository: FirebaseAuthRepository
+    @Inject lateinit var cloudSync: CloudSync
 
     private val themeViewModel: ThemeViewModel by viewModels()
 
@@ -63,6 +67,12 @@ class MainActivity : ComponentActivity() {
         }
 
         CoroutineScope(Dispatchers.IO).launch {
+            if (firebaseAuthRepository.currentUser != null) {
+                val restored = cloudSync.restoreFromCloud(repository, profileRepository)
+                if (!restored) cloudSync.backupNow()
+                cloudSync.start()
+            }
+
             val settings = repository.settingsFlow.first()
 
             // ── Reminder notification (unchanged) ────────────────────────────
@@ -85,7 +95,11 @@ class MainActivity : ComponentActivity() {
                 if (activeProfile.autoUploadEnabled) {
                     when {
                         activeProfile.sixHourlyUploadEnabled ->
-                            ProfileScheduler.scheduleSixHourly(this@MainActivity, activeProfile.id)
+                            ProfileScheduler.scheduleSixHourly(
+                                this@MainActivity,
+                                activeProfile.id,
+                                ExistingPeriodicWorkPolicy.KEEP
+                            )
                         activeProfile.biHourlyUploadEnabled ->
                             ProfileScheduler.scheduleBiHourly(this@MainActivity, activeProfile.id)
                         activeProfile.hourlyUploadEnabled ->
@@ -95,7 +109,7 @@ class MainActivity : ComponentActivity() {
                             activeProfile.id,
                             activeProfile.autoUploadHour,
                             activeProfile.autoUploadMinute,
-                            policy = ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+                            policy = ExistingPeriodicWorkPolicy.KEEP
                         )
                     }
                 }
@@ -107,11 +121,20 @@ class MainActivity : ComponentActivity() {
                 // Legacy global scheduling fallback (no profile configured)
                 when {
                     settings.sixHourlyUploadEnabled ->
-                        AutoUploadScheduler.scheduleSixHourly(this@MainActivity)
+                        AutoUploadScheduler.scheduleSixHourly(
+                            this@MainActivity,
+                            policy = ExistingPeriodicWorkPolicy.KEEP
+                        )
                     settings.biHourlyUploadEnabled ->
-                        AutoUploadScheduler.scheduleBiHourly(this@MainActivity)
+                        AutoUploadScheduler.scheduleBiHourly(
+                            this@MainActivity,
+                            policy = ExistingPeriodicWorkPolicy.KEEP
+                        )
                     settings.hourlyUploadEnabled ->
-                        AutoUploadScheduler.scheduleHourly(this@MainActivity)
+                        AutoUploadScheduler.scheduleHourly(
+                            this@MainActivity,
+                            policy = ExistingPeriodicWorkPolicy.KEEP
+                        )
                     else -> AutoUploadScheduler.scheduleDaily(
                         this@MainActivity,
                         settings.autoUploadHour,

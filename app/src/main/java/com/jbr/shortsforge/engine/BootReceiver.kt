@@ -71,6 +71,9 @@ class BootReceiver : BroadcastReceiver() {
                 moodScheduler.scheduleAllEnabled(context, moodConfigs)
                 Log.d(TAG, "Rescheduled moods")
 
+                QueueWorkDispatcher.recoverQueue(context, "boot_or_package_update")
+                Log.d(TAG, "Queued upload task recovery")
+
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to reschedule after boot", e)
             }

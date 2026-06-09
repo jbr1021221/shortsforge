@@ -1,5 +1,6 @@
 package com.jbr.shortsforge.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -49,10 +50,14 @@ data class ProfileEntity(
 
     // ── Video generation settings ─────────────────────────────────────────
     val imagesPerShort: Int = 5,
-    val videoDuration: Int = 15,
+    val videoDuration: Int = 30,
     val defaultFilter: String = "Random",
     val defaultTransition: String = "Random",
     val autoAddTextOverlay: Boolean = true,
+    @ColumnInfo(defaultValue = "images")
+    val uploadSourceMode: String = "images",
+    @ColumnInfo(name = "editing_mode", defaultValue = "CINEMATIC")
+    val editingMode: EditingMode = EditingMode.CINEMATIC,
 
     // ── Meta ──────────────────────────────────────────────────────────────
     val createdAt: Long = System.currentTimeMillis(),

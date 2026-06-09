@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.jbr.shortsforge.data.model.EditingMode
 import com.jbr.shortsforge.data.model.ImageItem
 import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.data.model.ProjectEntity
@@ -15,6 +16,10 @@ import com.jbr.shortsforge.data.repository.ProjectRepository
 import com.jbr.shortsforge.data.repository.ImageRepository
 import com.jbr.shortsforge.data.repository.UnsplashRepository
 import com.jbr.shortsforge.engine.AutoGenerateEngine
+import com.jbr.shortsforge.engine.AudioReactiveAnalyzer
+import com.jbr.shortsforge.engine.MusicManager
+import com.jbr.shortsforge.engine.VideoExporter
+import com.jbr.shortsforge.data.model.MusicSettings
 import com.jbr.shortsforge.data.model.SlideItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,7 +36,9 @@ data class HomeUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isSelectionMode: Boolean = false,
-    val selectedImageIds: LinkedHashSet<String> = LinkedHashSet()
+    val selectedImageIds: LinkedHashSet<String> = LinkedHashSet(),
+    val isLocalExporting: Boolean = false,
+    val localExportProgress: Int = 0
 )
 
 @HiltViewModel
@@ -41,7 +48,9 @@ class HomeViewModel @Inject constructor(
     private val imageRepository: ImageRepository,
     private val projectRepository: ProjectRepository,
     private val autoGenerateEngine: AutoGenerateEngine,
-    private val unsplashRepository: UnsplashRepository
+    private val unsplashRepository: UnsplashRepository,
+    private val musicManager: MusicManager,
+    private val videoExporter: VideoExporter
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -94,16 +103,18 @@ class HomeViewModel @Inject constructor(
 
     fun onFolderPicked(treeUri: Uri) {
         viewModelScope.launch {
+            val activeProfile = profileRepository.activeProfile.first()
+            if (activeProfile == null) {
+                Toast.makeText(context, "Create a profile before linking storage", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
             context.contentResolver.takePersistableUriPermission(
                 treeUri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
 
-            // Save folder to the active profile
-            val activeProfile = profileRepository.activeProfile.first()
-            if (activeProfile != null) {
-                profileRepository.updateFolder(activeProfile.id, treeUri.toString())
-            }
+            profileRepository.updateFolder(activeProfile.id, treeUri.toString())
 
             _uiState.value = _uiState.value.copy(
                 folderUri = treeUri,
@@ -172,8 +183,13 @@ class HomeViewModel @Inject constructor(
         val currentImages = _uiState.value.images
         if (currentImages.isEmpty()) return
         viewModelScope.launch {
+            val activeProfile = profileRepository.activeProfile.first()
+            if (activeProfile == null) {
+                Toast.makeText(context, "Create a profile before creating videos", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val slides = autoGenerateEngine.generateShort(context, currentImages)
+            val slides = autoGenerateEngine.generateShortForProfile(context, currentImages, activeProfile)
             _uiState.value = _uiState.value.copy(isLoading = false)
             _navigationEvent.emit(slides)
         }
@@ -182,6 +198,11 @@ class HomeViewModel @Inject constructor(
     fun onUnsplashCreate(photos: List<UnsplashPhoto>) {
         if (photos.isEmpty()) return
         viewModelScope.launch {
+            val activeProfile = profileRepository.activeProfile.first()
+            if (activeProfile == null) {
+                Toast.makeText(context, "Create a profile before creating videos", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(isLoading = true)
             val images = withContext(Dispatchers.IO) {
                 photos.mapNotNull { photo ->
@@ -196,7 +217,7 @@ class HomeViewModel @Inject constructor(
                 }
             }
             if (images.isEmpty()) { _uiState.value = _uiState.value.copy(isLoading = false); return@launch }
-            val slides = autoGenerateEngine.generateShort(context, images)
+            val slides = autoGenerateEngine.generateShortForProfile(context, images, activeProfile)
             _uiState.value = _uiState.value.copy(isLoading = false)
             _navigationEvent.emit(slides)
         }
@@ -212,8 +233,13 @@ class HomeViewModel @Inject constructor(
             .mapNotNull { id -> current.images.find { it.id == id } }
 
         viewModelScope.launch {
+            val activeProfile = profileRepository.activeProfile.first()
+            if (activeProfile == null) {
+                Toast.makeText(context, "Create a profile before creating videos", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
             _uiState.value = current.copy(isLoading = true)
-            val slides = autoGenerateEngine.generateShort(context, selectedImages)
+            val slides = autoGenerateEngine.generateShortForProfile(context, selectedImages, activeProfile)
             _uiState.value = _uiState.value.copy(
                 isLoading = false,
                 isSelectionMode = false,
@@ -221,5 +247,99 @@ class HomeViewModel @Inject constructor(
             )
             _navigationEvent.emit(slides)
         }
+    }
+
+    fun onSaveVideoOnly() {
+        val current = _uiState.value
+        if (current.isLocalExporting) return
+        if (current.images.isEmpty()) {
+            Toast.makeText(context, "No images found to export", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch {
+            val profile = profileRepository.activeProfile.first()
+            if (profile == null || profile.folderUri.isBlank()) {
+                Toast.makeText(context, "Select an active profile and media folder first", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                isLocalExporting = true,
+                localExportProgress = 0,
+                error = null
+            )
+
+            try {
+                val targetDurationMs = profile.videoDuration.coerceIn(1, 60) * 1000L
+                val musicSettings = withContext(Dispatchers.IO) {
+                    buildLocalMusicSettings(Uri.parse(profile.folderUri), targetDurationMs)
+                }
+                val beatTimestamps = withContext(Dispatchers.IO) {
+                    if (
+                        profile.editingMode == EditingMode.VELOCITY &&
+                        musicSettings.isMusicEnabled &&
+                        musicSettings.selectedMusicUri != null
+                    ) {
+                        AudioReactiveAnalyzer.extractBeatTimestamps(
+                            context,
+                            Uri.parse(musicSettings.selectedMusicUri)
+                        ).map { it - musicSettings.trimStartMs }
+                            .filter { it in 0L..targetDurationMs }
+                    } else {
+                        emptyList()
+                    }
+                }
+                val slides = withContext(Dispatchers.IO) {
+                    autoGenerateEngine.generateShortForProfile(
+                        context,
+                        current.images,
+                        profile,
+                        beatTimestamps
+                    )
+                }
+                if (slides.isEmpty()) {
+                    Toast.makeText(context, "Could not create slides from this folder", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val exportedFile = videoExporter.exportVideoSuspend(
+                    slides = slides,
+                    musicSettings = musicSettings,
+                    onProgress = { progress ->
+                        _uiState.value = _uiState.value.copy(localExportProgress = progress)
+                    }
+                )
+
+                if (exportedFile != null) {
+                    Toast.makeText(context, "Video saved to local storage", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "Video export failed", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Video export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                _uiState.value = _uiState.value.copy(
+                    isLocalExporting = false,
+                    localExportProgress = 0
+                )
+            }
+        }
+    }
+
+    private fun buildLocalMusicSettings(folderUri: Uri, videoDurationMs: Long): MusicSettings {
+        val availableMusic = musicManager.scanMusicFolder(folderUri)
+        if (availableMusic.isEmpty()) return MusicSettings(isMusicEnabled = false)
+
+        val music = availableMusic.random()
+        val safeDurationMs = videoDurationMs.coerceAtLeast(1_000L)
+        val maxStartMs = (music.durationMs - safeDurationMs).coerceAtLeast(0L)
+        val startMs = if (maxStartMs > 0L) (0L..maxStartMs).random() else 0L
+        return MusicSettings(
+            selectedMusicUri = music.uri,
+            selectedMusicName = music.fileName,
+            isMusicEnabled = true,
+            trimStartMs = startMs,
+            trimEndMs = startMs + safeDurationMs
+        )
     }
 }

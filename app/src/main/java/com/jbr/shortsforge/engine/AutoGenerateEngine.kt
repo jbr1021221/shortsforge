@@ -14,22 +14,8 @@ import javax.inject.Singleton
 @Singleton
 class AutoGenerateEngine @Inject constructor(
     private val settingsRepository: AppSettingsRepository,
-    private val kenBurnsEngine: KenBurnsEngine
+    private val editingPlanBuilder: EditingPlanBuilder
 ) {
-    private val motivationalPhrases = listOf(
-        "Believe in yourself", "Keep pushing forward", "Success is a journey",
-        "Stay focused, stay humble", "Dream big, work hard",
-        "Every day is a new beginning", "Consistency is key",
-        "Your only limit is you", "Make it happen", "Do what you love",
-        "Be the change", "Strive for greatness", "Stay positive",
-        "Work hard in silence", "Never give up", "Focus on the good",
-        "The best is yet to come", "Limitless", "Chase your dreams",
-        "Stay hungry, stay foolish"
-    )
-
-    private val filters     = listOf("None", "Vintage", "B&W", "Warm", "Cool")
-    private val transitions = listOf("Fade", "Slide", "Zoom", "Dissolve")
-
     // ── Original — reads from global AppSettings (used by manual editor) ──
     suspend fun generateShort(context: Context, images: List<ImageItem>): List<SlideItem> {
         if (images.isEmpty()) return emptyList()
@@ -59,7 +45,8 @@ class AutoGenerateEngine @Inject constructor(
     suspend fun generateShortForProfile(
         context: Context,
         images: List<ImageItem>,
-        profile: ProfileEntity
+        profile: ProfileEntity,
+        beatTimestamps: List<Long> = emptyList()
     ): List<SlideItem> {
         if (images.isEmpty()) return emptyList()
         val settings = settingsRepository.settingsFlow.first()
@@ -76,7 +63,9 @@ class AutoGenerateEngine @Inject constructor(
             videoDurationSec = profile.videoDuration,
             defaultFilter = profile.defaultFilter,
             defaultTransition = profile.defaultTransition,
-            autoAddText = profile.autoAddTextOverlay
+            autoAddText = profile.autoAddTextOverlay,
+            profile = profile,
+            beatTimestamps = beatTimestamps
         )
         val usedIds = slides.map { it.imageUri }
         UsedImageLog.markUsed(context, usedIds)
@@ -89,29 +78,42 @@ class AutoGenerateEngine @Inject constructor(
         videoDurationSec: Int,
         defaultFilter: String,
         defaultTransition: String,
-        autoAddText: Boolean
+        autoAddText: Boolean,
+        profile: ProfileEntity? = null,
+        beatTimestamps: List<Long> = emptyList()
     ): List<SlideItem> {
-        val selected = if (images.size <= imagesPerShort) images.shuffled()
-                       else images.shuffled().take(imagesPerShort)
-
-        val totalDurationMs  = videoDurationSec * 1000
-        val slideDurationMs  = totalDurationMs / selected.size
+        val plan = editingPlanBuilder.buildImagePlan(
+            images = images,
+            imagesPerShort = imagesPerShort,
+            videoDurationSec = videoDurationSec,
+            defaultFilter = defaultFilter,
+            defaultTransition = defaultTransition,
+            autoAddText = autoAddText,
+            profile = profile,
+            beatTimestampsOverride = beatTimestamps
+        )
 
         Log.d("AutoGenerate",
-            "Generating ${selected.size} slides | duration=${totalDurationMs}ms | " +
+            "Generating ${plan.size} planned slides | duration=${plan.sumOf { it.durationMs }}ms | " +
             "filter=$defaultFilter | transition=$defaultTransition")
 
-        return selected.map { image ->
-            val finalFilter = if (defaultFilter == "Random") filters.random() else defaultFilter
-            val finalTransition = if (defaultTransition == "Random") transitions.random() else defaultTransition
+        return plan.mapIndexed { index, item ->
             SlideItem(
-                imageUri      = image.uri.toString(),
-                filterName    = finalFilter,
-                transitionName = finalTransition,
-                overlayText   = if (autoAddText) motivationalPhrases.random() else "",
-                durationMs    = slideDurationMs,
+                imageUri = item.image.uri.toString(),
+                filterName = item.filterName,
+                transitionName = item.transitionName,
+                overlayText = item.overlayText,
+                durationMs = item.durationMs,
+                fontSize = item.fontSize,
+                textPosition = item.textPosition,
+                kenBurnsConfig = item.kenBurnsConfig,
                 isTextEnabled = autoAddText,
-                kenBurnsConfig = kenBurnsEngine.randomKenBurns()
+                avgBrightness = item.avgBrightness,
+                transitionDurationMs = item.transitionDurationMs,
+                disableAudioFlash = item.disableAudioFlash,
+                slideStartMs = item.slideStartMs,
+                beatTimestamps = item.beatTimestamps,
+                zoomPunchStrength = if (item.beatTimestamps.isNotEmpty()) 0.85f else 0.45f
             )
         }
     }

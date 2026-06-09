@@ -80,7 +80,11 @@ class MoodScheduler @Inject constructor() {
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
 
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "manual_mood_upload_${mood.name}",
+            ExistingWorkPolicy.KEEP,
+            request
+        )
         Log.d(TAG, "Manual run triggered for ${mood.label}")
     }
 

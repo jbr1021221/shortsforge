@@ -2,7 +2,7 @@ package com.jbr.shortsforge.data.model
 
 data class AppSettings(
     val imagesPerShort: Int = 5,
-    val videoDuration: Int = 15,
+    val videoDuration: Int = 30,
     val aspectRatio: String = "9:16",
     val defaultTransition: String = "Random",
     val defaultFilter: String = "Random",

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "298799263389",
+    "project_id": "shortforge-e8db3",
+    "storage_bucket": "shortforge-e8db3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:298799263389:android:f568553f74e97ce976ee74",
+        "android_client_info": {
+          "package_name": "com.jbr.shortsforge"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDaff30pqKrCn2zEbY4v9FpJf5fxy2iTqg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

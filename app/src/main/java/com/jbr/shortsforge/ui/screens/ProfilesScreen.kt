@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.jbr.shortsforge.data.model.EditingMode
 import com.jbr.shortsforge.data.model.ProfileEntity
 import com.jbr.shortsforge.engine.GoogleAuthManager
 import com.jbr.shortsforge.engine.TikTokUploadManager
@@ -508,6 +509,12 @@ private fun ProfileCard(
 
                 // Schedule badge
                 if (profile.autoUploadEnabled) {
+                    val badgeText = when {
+                        profile.hourlyUploadEnabled    -> "Every hour"
+                        profile.biHourlyUploadEnabled  -> "Every 2 hours"
+                        profile.sixHourlyUploadEnabled -> "Every 6 hours"
+                        else -> String.format("%02d:%02d daily", profile.autoUploadHour, profile.autoUploadMinute)
+                    }
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50.dp))
@@ -524,8 +531,7 @@ private fun ProfileCard(
                                 .background(MaterialTheme.colorScheme.primary)
                         )
                         Text(
-                            String.format("%02d:%02d daily",
-                                profile.autoUploadHour, profile.autoUploadMinute),
+                            badgeText,
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
@@ -695,12 +701,22 @@ private fun EditProfileSheet(
     }
 
     // State for schedule
-    var scheduleEnabled by remember { mutableStateOf(profile.autoUploadEnabled) }
-    var scheduleHour    by remember { mutableStateOf(profile.autoUploadHour) }
-    var scheduleMinute  by remember { mutableStateOf(profile.autoUploadMinute) }
-    var hourlyEnabled   by remember { mutableStateOf(profile.hourlyUploadEnabled) }
-    var biHourlyEnabled by remember { mutableStateOf(profile.biHourlyUploadEnabled) }
-    var showTimePicker  by remember { mutableStateOf(false) }
+    var scheduleEnabled  by remember { mutableStateOf(profile.autoUploadEnabled) }
+    var scheduleHour     by remember { mutableStateOf(profile.autoUploadHour) }
+    var scheduleMinute   by remember { mutableStateOf(profile.autoUploadMinute) }
+    var hourlyEnabled    by remember { mutableStateOf(profile.hourlyUploadEnabled) }
+    var biHourlyEnabled  by remember { mutableStateOf(profile.biHourlyUploadEnabled) }
+    var sixHourlyEnabled by remember { mutableStateOf(profile.sixHourlyUploadEnabled) }
+    var showTimePicker   by remember { mutableStateOf(false) }
+    var editingMode      by remember { mutableStateOf(profile.editingMode) }
+
+    val isIntervalMode = hourlyEnabled || biHourlyEnabled || sixHourlyEnabled
+    val scheduleLabel = when {
+        hourlyEnabled    -> "Every hour"
+        biHourlyEnabled  -> "Every 2 hours"
+        sixHourlyEnabled -> "Every 6 hours"
+        else             -> String.format("Daily at %02d:%02d", scheduleHour, scheduleMinute)
+    }
 
     // State for FB dialog
     var showFbDialog    by remember { mutableStateOf(false) }
@@ -804,6 +820,54 @@ private fun EditProfileSheet(
                             modifier = Modifier.size(18.dp))
                     }
                 }
+            }
+
+            // ── Editing style ─────────────────────────────────────────────
+            SectionCard("Editing Style") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = editingMode == EditingMode.CINEMATIC,
+                        onClick = { editingMode = EditingMode.CINEMATIC },
+                        label = { Text("Cinematic") },
+                        leadingIcon = if (editingMode == EditingMode.CINEMATIC) {
+                            {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else {
+                            null
+                        }
+                    )
+                    FilterChip(
+                        selected = editingMode == EditingMode.VELOCITY,
+                        onClick = { editingMode = EditingMode.VELOCITY },
+                        label = { Text("Velocity") },
+                        leadingIcon = if (editingMode == EditingMode.VELOCITY) {
+                            {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else {
+                            null
+                        }
+                    )
+                }
+                Text(
+                    text = when (editingMode) {
+                        EditingMode.CINEMATIC ->
+                            "Smooth cinematic motion. Best for calm, spiritual content."
+                        EditingMode.VELOCITY ->
+                            "Beat-synced speed ramp. Motion slows before beats and snaps after them."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // ── YouTube ───────────────────────────────────────────────────
@@ -910,7 +974,7 @@ private fun EditProfileSheet(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (scheduleEnabled) {
+                        if (scheduleEnabled && !isIntervalMode) {
                             IconButton(onClick = { showTimePicker = true },
                                 modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Edit, "Edit time",
@@ -922,10 +986,20 @@ private fun EditProfileSheet(
                             checked = scheduleEnabled,
                             onCheckedChange = { enabled ->
                                 scheduleEnabled = enabled
-                                if (enabled) showTimePicker = true
-                                else {
+                                if (enabled) {
+                                    if (isIntervalMode) {
+                                        // interval mode — no time needed, save immediately
+                                        viewModel.updateSchedule(profile.id, true,
+                                            scheduleHour, scheduleMinute,
+                                            hourlyEnabled, biHourlyEnabled, sixHourlyEnabled)
+                                        onSaved("Auto-upload enabled for ${profile.name}")
+                                    } else {
+                                        showTimePicker = true
+                                    }
+                                } else {
                                     viewModel.updateSchedule(profile.id, false,
-                                        scheduleHour, scheduleMinute, hourlyEnabled, biHourlyEnabled)
+                                        scheduleHour, scheduleMinute,
+                                        hourlyEnabled, biHourlyEnabled, sixHourlyEnabled)
                                     onSaved("Auto-upload disabled for ${profile.name}")
                                 }
                             },
@@ -942,72 +1016,78 @@ private fun EditProfileSheet(
 
                 if (scheduleEnabled) {
                     Spacer(Modifier.height(8.dp))
+                    // Current mode label
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Box(
-                            Modifier.size(6.dp).clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
-                        )
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
                         Text(
-                            String.format("Daily at %02d:%02d", scheduleHour, scheduleMinute),
+                            scheduleLabel,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Hourly mode",
-                            style = MaterialTheme.typography.bodySmall,
+                    Spacer(Modifier.height(8.dp))
+
+                    val switchColors = SwitchDefaults.colors(
+                        checkedThumbColor   = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor   = MaterialTheme.colorScheme.primary,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        uncheckedBorderColor= MaterialTheme.colorScheme.outline
+                    )
+
+                    // Hourly
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Every hour", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Switch(
-                            checked = hourlyEnabled,
+                        Switch(checked = hourlyEnabled, colors = switchColors,
                             onCheckedChange = { h ->
                                 hourlyEnabled = h
-                                if (h) biHourlyEnabled = false
+                                if (h) { biHourlyEnabled = false; sixHourlyEnabled = false }
                                 viewModel.updateSchedule(profile.id, scheduleEnabled,
-                                    scheduleHour, scheduleMinute, h, biHourlyEnabled)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
-                                uncheckedBorderColor = MaterialTheme.colorScheme.outline
-                            )
-                        )
+                                    scheduleHour, scheduleMinute, h, biHourlyEnabled, sixHourlyEnabled)
+                            })
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Every 2 hours mode",
-                            style = MaterialTheme.typography.bodySmall,
+
+                    // Every 2 hours
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Every 2 hours", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Switch(
-                            checked = biHourlyEnabled,
+                        Switch(checked = biHourlyEnabled, colors = switchColors,
                             onCheckedChange = { bh ->
                                 biHourlyEnabled = bh
-                                if (bh) hourlyEnabled = false
+                                if (bh) { hourlyEnabled = false; sixHourlyEnabled = false }
                                 viewModel.updateSchedule(profile.id, scheduleEnabled,
-                                    scheduleHour, scheduleMinute, hourlyEnabled, bh)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
-                                uncheckedBorderColor = MaterialTheme.colorScheme.outline
-                            )
-                        )
+                                    scheduleHour, scheduleMinute, hourlyEnabled, bh, sixHourlyEnabled)
+                            })
+                    }
+
+                    // Every 6 hours
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Every 6 hours", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Switch(checked = sixHourlyEnabled, colors = switchColors,
+                            onCheckedChange = { sh ->
+                                sixHourlyEnabled = sh
+                                if (sh) { hourlyEnabled = false; biHourlyEnabled = false }
+                                viewModel.updateSchedule(profile.id, scheduleEnabled,
+                                    scheduleHour, scheduleMinute, hourlyEnabled, biHourlyEnabled, sh)
+                            })
+                    }
+
+                    // Daily time picker row — only shown when no interval mode is active
+                    if (!isIntervalMode) {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Daily at ${String.format("%02d:%02d", scheduleHour, scheduleMinute)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = { showTimePicker = true }) {
+                                Text("Change time", fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -1015,8 +1095,16 @@ private fun EditProfileSheet(
             // ── Save button ───────────────────────────────────────────────
             Button(
                 onClick = {
-                    viewModel.updateSchedule(profile.id, scheduleEnabled,
-                        scheduleHour, scheduleMinute, hourlyEnabled, biHourlyEnabled)
+                    viewModel.saveScheduleAndEditingMode(
+                        profileId = profile.id,
+                        enabled = scheduleEnabled,
+                        hour = scheduleHour,
+                        minute = scheduleMinute,
+                        hourly = hourlyEnabled,
+                        biHourly = biHourlyEnabled,
+                        sixHourly = sixHourlyEnabled,
+                        editingMode = editingMode
+                    )
                     onSaved("Profile saved!")
                     onDismiss()
                 },
@@ -1042,9 +1130,11 @@ private fun EditProfileSheet(
                 TextButton(onClick = {
                     scheduleHour = timeState.hour
                     scheduleMinute = timeState.minute
+                    scheduleHour = timeState.hour
+                    scheduleMinute = timeState.minute
                     scheduleEnabled = true
                     viewModel.updateSchedule(profile.id, true,
-                        timeState.hour, timeState.minute, hourlyEnabled, biHourlyEnabled)
+                        timeState.hour, timeState.minute, hourlyEnabled, biHourlyEnabled, sixHourlyEnabled)
                     showTimePicker = false
                     onSaved(String.format("Upload scheduled at %02d:%02d for ${profile.name}",
                         timeState.hour, timeState.minute))

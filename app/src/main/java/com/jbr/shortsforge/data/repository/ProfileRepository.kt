@@ -1,6 +1,7 @@
 package com.jbr.shortsforge.data.repository
 
 import com.jbr.shortsforge.data.database.dao.ProfileDao
+import com.jbr.shortsforge.data.model.EditingMode
 import com.jbr.shortsforge.data.model.ProfileEntity
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -27,6 +28,10 @@ class ProfileRepository @Inject constructor(
         profileDao.updateProfile(profile)
     }
 
+    suspend fun upsertProfile(profile: ProfileEntity) {
+        profileDao.insertProfile(profile)
+    }
+
     suspend fun deleteProfile(profile: ProfileEntity) {
         profileDao.deleteProfile(profile)
     }
@@ -49,6 +54,11 @@ class ProfileRepository @Inject constructor(
     suspend fun updateFolder(profileId: Long, folderUri: String) {
         val profile = profileDao.getProfileById(profileId) ?: return
         profileDao.updateProfile(profile.copy(folderUri = folderUri))
+    }
+
+    suspend fun updateUploadSourceMode(profileId: Long, mode: String) {
+        val profile = profileDao.getProfileById(profileId) ?: return
+        profileDao.updateProfile(profile.copy(uploadSourceMode = mode))
     }
 
     suspend fun updateYouTube(profileId: Long, email: String, name: String) {
@@ -103,6 +113,30 @@ class ProfileRepository @Inject constructor(
             biHourlyUploadEnabled = biHourly,
             sixHourlyUploadEnabled = sixHourly
         ))
+    }
+
+    suspend fun updateScheduleAndEditingMode(
+        profileId: Long,
+        enabled: Boolean,
+        hour: Int,
+        minute: Int,
+        hourly: Boolean,
+        biHourly: Boolean = false,
+        sixHourly: Boolean = false,
+        editingMode: EditingMode
+    ) {
+        val profile = profileDao.getProfileById(profileId) ?: return
+        profileDao.updateProfile(
+            profile.copy(
+                autoUploadEnabled = enabled,
+                autoUploadHour = hour,
+                autoUploadMinute = minute,
+                hourlyUploadEnabled = hourly,
+                biHourlyUploadEnabled = biHourly,
+                sixHourlyUploadEnabled = sixHourly,
+                editingMode = editingMode
+            )
+        )
     }
 
     suspend fun updateBiHourlyUploadEnabled(profileId: Long, enabled: Boolean) {

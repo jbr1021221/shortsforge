@@ -65,7 +65,9 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 // ── Home Design Tokens ───────────────────────────────────────────────────────────────
 private val HomeChipShape     = RoundedCornerShape(50.dp)
@@ -84,6 +86,7 @@ fun HomeScreen(
     onProfilesClick: () -> Unit,
     onMoodSetupClick: () -> Unit = {},
     onTemplatesClick: () -> Unit = {},
+    onSeeAllPhotosClick: () -> Unit = {},
     onNavigateToEditor: (List<SlideItem>) -> Unit
 ) {
     val context = LocalContext.current
@@ -111,7 +114,9 @@ fun HomeScreen(
         else viewModel.refresh()
     }
 
-    LaunchedEffect(Unit) { permissionLauncher.launch(requiredPermissions) }
+    LaunchedEffect(activeProfile?.id) {
+        if (activeProfile != null) permissionLauncher.launch(requiredPermissions)
+    }
     LaunchedEffect(Unit) {
         viewModel.navigationEvent.collect { slides -> onNavigateToEditor(slides) }
     }
@@ -256,22 +261,18 @@ fun HomeScreen(
             },
             floatingActionButton = {
                 val unsplashSelected = unsplashState.selectedIds.size
-                val localImages = uiState.images.isNotEmpty()
-                val fabVisible = if (activeTab == 1) unsplashSelected > 0 else localImages
+                val fabVisible = if (activeTab == 1) unsplashSelected > 0 else uiState.images.isNotEmpty()
 
                 AnimatedVisibility(
                     visible = fabVisible,
                     enter = slideInVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy), initialOffsetY = { it * 2 }) + fadeIn(tween(250)),
                     exit = slideOutVertically(tween(180)) { it * 2 } + fadeOut(tween(180))
                 ) {
-                    val selectedCount = if (activeTab == 1) unsplashSelected else uiState.selectedImageIds.size
                     ExtendedFloatingActionButton(
                         onClick = {
                             if (activeTab == 1) {
                                 viewModel.onUnsplashCreate(unsplashViewModel.selectedPhotos())
                                 unsplashViewModel.clearSelection()
-                            } else if (uiState.isSelectionMode) {
-                                viewModel.onCreateFromSelected()
                             } else {
                                 viewModel.onCreateShort()
                             }
@@ -279,12 +280,7 @@ fun HomeScreen(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         icon = { Icon(Icons.Default.AutoAwesome, null) },
-                        text = {
-                            Text(
-                                if (selectedCount > 0) "CREATE ($selectedCount)" else "CREATE",
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
+                        text = { Text("CREATE", fontWeight = FontWeight.ExtraBold) }
                     )
                 }
             }
@@ -292,14 +288,14 @@ fun HomeScreen(
             Column(Modifier.fillMaxSize().padding(paddingValues)) {
 
                 // ── First-launch banner ────────────────────────────────────
-                if (activeProfile == null) {
-                    FirstLaunchBanner(onGetStarted = onProfilesClick)
-                }
+                if (activeProfile == null) FirstLaunchBanner(onGetStarted = onProfilesClick)
 
                 // ── Automation status card ────────────────────────────────
                 if (activeProfile != null && !uiState.isSelectionMode) {
                     AutomationStatusCard(
                         profile = activeProfile!!,
+                        isSavingLocalVideo = uiState.isLocalExporting,
+                        localSaveProgress = uiState.localExportProgress,
                         onScheduleSelect = { interval ->
                             when (interval) {
                                 "1h"    -> settingsViewModel.updateHourlyUploadEnabled(true)
@@ -317,6 +313,9 @@ fun HomeScreen(
                         onRunNow = {
                             com.jbr.shortsforge.engine.ProfileScheduler.runTestNow(context, activeProfile!!.id)
                             scope.launch { snackbarHostState.showSnackbar("Upload started for ${activeProfile!!.name}!") }
+                        },
+                        onSaveVideoOnly = {
+                            viewModel.onSaveVideoOnly()
                         }
                     )
                 }
@@ -326,130 +325,216 @@ fun HomeScreen(
                     RecentProjectsSection(projects = uiState.projects)
                 }
 
-                // ── Tab toggle: My Photos / Unsplash ──────────────────────
+                // ── Photo preview strip ────────────────────────────────────
                 val unsplashEnabled = settings.unsplashEnabled
-                // If Unsplash was disabled while on that tab, snap back to local
                 LaunchedEffect(unsplashEnabled) { if (!unsplashEnabled) activeTab = 0 }
 
-                if (!uiState.isSelectionMode) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val tabLabels = if (unsplashEnabled) listOf("My Photos", "Unsplash") else listOf("My Photos")
-                        tabLabels.forEachIndexed { index, label ->
-                            val selected = activeTab == index
-                            Box(
+                when {
+                    activeProfile == null -> {
+                        Box(modifier = Modifier.weight(1f)) {
+                            ProfileRequiredState(onCreateProfile = onProfilesClick)
+                        }
+                    }
+                    uiState.folderUri == null -> {
+                        Box(modifier = Modifier.weight(1f)) {
+                            EmptyFolderState { folderPickerLauncher.launch(null) }
+                        }
+                    }
+                    uiState.isLoading -> {
+                        PhotoStripShimmer()
+                    }
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            // ── My Photos header ──────────────────────────
+                            Row(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(50.dp))
-                                    .background(
-                                        if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                    .clickable { activeTab = index }
-                                    .padding(horizontal = 18.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    label,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50.dp))
+                                        .background(MaterialTheme.colorScheme.primary)
+                                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.Photo, null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(14.dp))
+                                    Text("My Photos", fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimary)
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50.dp))
+                                        .clickable(onClick = onSeeAllPhotosClick)
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (uiState.images.isNotEmpty()) {
+                                        Text("${uiState.images.size} photos",
+                                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("·", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                                    }
+                                    Text("SEE ALL", fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.primary)
+                                }
                             }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        if (activeTab == 0 && uiState.images.isNotEmpty()) {
-                            Text("${uiState.images.size} photos",
-                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (activeTab == 1 && unsplashState.selectedIds.isNotEmpty()) {
-                            TextButton(
-                                onClick = { unsplashViewModel.clearSelection() },
-                                contentPadding = PaddingValues(horizontal = 8.dp)
+
+                            // ── 1-row photo strip ─────────────────────────
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text("Clear (${unsplashState.selectedIds.size})",
-                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                uiState.images.take(3).forEach { image ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        GlideImage(
+                                            model = image.uri,
+                                            contentDescription = image.fileName,
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
+                                repeat((3 - uiState.images.size).coerceAtLeast(0)) {
+                                    Box(modifier = Modifier
+                                        .weight(1f).aspectRatio(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant))
+                                }
                             }
-                        }
-                    }
-                }
 
-                // ── Selection hint bar (local tab) ─────────────────────────
-                AnimatedVisibility(visible = uiState.isSelectionMode,
-                    enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.TouchApp, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Tap images to select · long-press to start", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                    }
-                }
+                            Spacer(Modifier.height(20.dp))
 
-                // ── Main content ───────────────────────────────────────────
-                Box(modifier = Modifier.weight(1f)) {
-                    if (activeTab == 1 && unsplashEnabled) {
-                        UnsplashTab(viewModel = unsplashViewModel)
-                    } else when {
-                        uiState.folderUri == null -> EmptyFolderState { folderPickerLauncher.launch(null) }
-                        uiState.isLoading -> ShimmerImageGrid()
-                        uiState.error != null -> {
-                            if (uiState.images.isEmpty())
-                                EmptyState(Icons.Default.Warning, "No Images Found", uiState.error!!, "Try Another Folder") { folderPickerLauncher.launch(null) }
-                            else ErrorState(message = uiState.error!!)
-                        }
-                        else -> ImageGrid(
-                            images = uiState.images,
-                            isSelectionMode = uiState.isSelectionMode,
-                            selectedImageIds = uiState.selectedImageIds,
-                            settings = settings,
-                            onImageClick = { imageId -> if (uiState.isSelectionMode) viewModel.toggleImageSelection(imageId) },
-                            onImageLongClick = { imageId ->
-                                viewModel.toggleSelectionMode()
-                                viewModel.toggleImageSelection(imageId)
-                            }
-                        )
-                    }
-                }
-
-                // ── Selection bottom bar (local tab) ───────────────────────
-                AnimatedVisibility(visible = uiState.isSelectionMode,
-                    enter = slideInVertically { it }, exit = slideOutVertically { it }) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceContainer)
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
+                            // ── Quick Actions ─────────────────────────────
                             Text(
-                                "${uiState.selectedImageIds.size} selected",
-                                color = MaterialTheme.colorScheme.onSurface,
+                                "QUICK ACTIONS",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
-                            )
-                            if (uiState.selectedImageIds.isEmpty())
-                                Text("Tap images above", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                        }
-                        if (uiState.selectedImageIds.isNotEmpty())
-                            Text(
-                                "Tap CREATE →",
                                 color = MaterialTheme.colorScheme.primary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                letterSpacing = 1.2.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp)
                             )
+                            Spacer(Modifier.height(8.dp))
+
+                            val quickActions = listOf(
+                                Triple(Icons.Default.BarChart,       "Analytics",    "View stats & insights") to onDashboardClick,
+                                Triple(Icons.Rounded.History,        "History",      "Past upload records")   to onHistoryClick,
+                                Triple(Icons.Rounded.ManageAccounts, "Profiles",     "Manage channels")       to onProfilesClick,
+                                Triple(Icons.Default.Style,          "Templates",    "Browse video styles")   to onTemplatesClick
+                            )
+                            Column(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                quickActions.chunked(2).forEach { row ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        row.forEach { (triple, onClick) ->
+                                            val (icon, title, subtitle) = triple
+                                            Row(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                    .clickable(onClick = onClick)
+                                                    .padding(14.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(icon, null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp))
+                                                }
+                                                Column {
+                                                    Text(title, fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onSurface)
+                                                    Text(subtitle, fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1)
+                                                }
+                                            }
+                                        }
+                                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+
+                            // ── Unsplash section (if enabled) ─────────────
+                            if (unsplashEnabled) {
+                                Spacer(Modifier.height(16.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50.dp))
+                                            .background(
+                                                if (activeTab == 1) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.surfaceVariant
+                                            )
+                                            .clickable { activeTab = 1 }
+                                            .padding(horizontal = 18.dp, vertical = 8.dp)
+                                    ) {
+                                        Text("Unsplash", fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (activeTab == 1) MaterialTheme.colorScheme.onPrimary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (unsplashState.selectedIds.isNotEmpty()) {
+                                        TextButton(
+                                            onClick = { unsplashViewModel.clearSelection() },
+                                            contentPadding = PaddingValues(horizontal = 8.dp)
+                                        ) {
+                                            Text("Clear (${unsplashState.selectedIds.size})",
+                                                fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                                if (activeTab == 1) {
+                                    Box(modifier = Modifier.height(400.dp)) {
+                                        UnsplashTab(viewModel = unsplashViewModel)
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(100.dp)) // FAB clearance
+                        }
                     }
                 }
+
             }
         }
 
@@ -524,13 +609,108 @@ fun HomeScreen(
     }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+private fun nextUploadEpochFor(profile: com.jbr.shortsforge.data.model.ProfileEntity): Long {
+    if (!profile.autoUploadEnabled) return 0L
+    val now = System.currentTimeMillis()
+    val cal = Calendar.getInstance()
+    return when {
+        profile.hourlyUploadEnabled -> {
+            cal.add(Calendar.HOUR_OF_DAY, 1)
+            cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+        profile.biHourlyUploadEnabled -> {
+            val h = cal.get(Calendar.HOUR_OF_DAY)
+            val next = ((h / 2) + 1) * 2
+            cal.set(Calendar.HOUR_OF_DAY, next % 24)
+            cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            if (next >= 24) cal.add(Calendar.DAY_OF_YEAR, 1)
+            cal.timeInMillis
+        }
+        profile.sixHourlyUploadEnabled -> {
+            val h = cal.get(Calendar.HOUR_OF_DAY)
+            val next = ((h / 6) + 1) * 6
+            cal.set(Calendar.HOUR_OF_DAY, next % 24)
+            cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            if (next >= 24) cal.add(Calendar.DAY_OF_YEAR, 1)
+            cal.timeInMillis
+        }
+        else -> {
+            cal.set(Calendar.HOUR_OF_DAY, profile.autoUploadHour)
+            cal.set(Calendar.MINUTE, profile.autoUploadMinute)
+            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            if (cal.timeInMillis <= now) cal.add(Calendar.DAY_OF_YEAR, 1)
+            cal.timeInMillis
+        }
+    }
+}
+
+@Composable
+private fun HomeCountdown(profile: com.jbr.shortsforge.data.model.ProfileEntity) {
+    var h by remember { mutableStateOf("--") }
+    var m by remember { mutableStateOf("--") }
+    var s by remember { mutableStateOf("--") }
+
+    LaunchedEffect(profile) {
+        if (!profile.autoUploadEnabled) { h = "--"; m = "--"; s = "--"; return@LaunchedEffect }
+        while (true) {
+            // Recompute the next epoch each cycle so it refreshes after every upload window
+            val epochMs = nextUploadEpochFor(profile)
+            while (true) {
+                val rem = (epochMs - System.currentTimeMillis()).coerceAtLeast(0)
+                h = "%02d".format(rem / 3_600_000)
+                m = "%02d".format((rem % 3_600_000) / 60_000)
+                s = "%02d".format((rem % 60_000) / 1_000)
+                if (rem == 0L) break
+                delay(1_000)
+            }
+            delay(2_000) // brief pause then recompute epoch for next window
+        }
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        CountDigitBlock(h)
+        Text(":", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+        CountDigitBlock(m)
+        Text(":", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+        CountDigitBlock(s)
+    }
+}
+
+@Composable
+private fun CountDigitBlock(value: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            value,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp,
+            color = MaterialTheme.colorScheme.primary,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+        )
+    }
+}
+
 // ── Automation Status Card ────────────────────────────────────────────────────
 
 @Composable
 private fun AutomationStatusCard(
     profile: com.jbr.shortsforge.data.model.ProfileEntity,
+    isSavingLocalVideo: Boolean,
+    localSaveProgress: Int,
     onScheduleSelect: (String) -> Unit,
-    onRunNow: () -> Unit
+    onRunNow: () -> Unit,
+    onSaveVideoOnly: () -> Unit
 ) {
     val autoOn  = profile.autoUploadEnabled
     val hourly  = profile.hourlyUploadEnabled
@@ -543,72 +723,167 @@ private fun AutomationStatusCard(
         sixHour -> "6h"
         else    -> "Daily"
     }
+    val intervalText = when (activeInterval) {
+        "Off"   -> "Auto-upload off"
+        "1h"    -> "Every hour"
+        "2h"    -> "Every 2 hours"
+        "6h"    -> "Every 6 hours"
+        "Daily" -> "Daily at %02d:%02d".format(profile.autoUploadHour, profile.autoUploadMinute)
+        else    -> activeInterval
+    }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(
-                        if (autoOn) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline
-                    ))
+                Text(
+                    "NEXT RUN",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                if (autoOn) {
+                    HomeCountdown(profile = profile)
+                } else {
                     Text(
-                        if (autoOn) when (activeInterval) {
-                            "1h"    -> "Uploading every hour"
-                            "2h"    -> "Uploading every 2 hours"
-                            "6h"    -> "Uploading every 6 hours"
-                            "Daily" -> "Uploading once daily"
-                            else    -> "Auto-upload on"
-                        } else "Auto-upload off",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (autoOn) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.onSurfaceVariant
+                        "--:--:--",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 20.sp
                     )
                 }
-                // Run now button
+            }
+
+            Column(
+                modifier = Modifier
+                    .widthIn(min = 104.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "PERIOD",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    intervalText,
+                    color = if (autoOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        androidx.compose.foundation.lazy.LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(horizontal = 0.dp)
+        ) {
+            items(listOf("Off", "1h", "2h", "6h", "Daily")) { chip ->
+                val selected = chip == activeInterval
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                        .clickable(onClick = onRunNow)
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary
+                            else Color.Transparent
+                        )
+                        .clickable { onScheduleSelect(chip) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Icon(Icons.Default.CloudUpload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
-                        Text("Run now", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
+                    Text(
+                        chip, fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-            // Interval chips
-            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val chips = listOf("Off", "1h", "2h", "6h", "Daily")
-                items(chips) { chip ->
-                    val selected = chip == activeInterval
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50.dp))
-                            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                            .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50.dp))
-                            .clickable { onScheduleSelect(chip) }
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            chip, fontSize = 12.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onSaveVideoOnly,
+                enabled = !isSavingLocalVideo,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isSavingLocalVideo) {
+                    CircularProgressIndicator(
+                        progress = { (localSaveProgress / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Save,
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (isSavingLocalVideo) "${localSaveProgress}%" else "Save Video",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.sp
+                )
+            }
+
+            Button(
+                onClick = onRunNow,
+                enabled = !isSavingLocalVideo,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Run Upload",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.sp
+                )
             }
         }
     }
@@ -1408,6 +1683,32 @@ private fun ShimmerImageGrid() {
     }
 }
 
+@Composable
+private fun PhotoStripShimmer() {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val translateAnim by transition.animateFloat(
+        initialValue = 0f, targetValue = 1000f,
+        animationSpec = infiniteRepeatable(tween(1000, easing = LinearEasing), RepeatMode.Restart),
+        label = "shimmer_anim"
+    )
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            MaterialTheme.colorScheme.surfaceVariant
+        ),
+        start = Offset.Zero, end = Offset(translateAnim, translateAnim)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        repeat(3) {
+            Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(shimmerBrush))
+        }
+    }
+}
+
 private fun friendlyError(raw: String): String = when {
     raw.contains("permission", ignoreCase = true) ->
         "Storage permission is needed. Grant it in your device Settings."
@@ -1422,9 +1723,6 @@ private fun friendlyError(raw: String): String = when {
 
 @Composable
 private fun FirstLaunchBanner(onGetStarted: () -> Unit) {
-    var dismissed by remember { mutableStateOf(false) }
-    if (dismissed) return
-
     AnimatedVisibility(
         visible = true,
         enter = slideInVertically(tween(400)) { -it } + fadeIn(tween(300))
@@ -1454,7 +1752,7 @@ private fun FirstLaunchBanner(onGetStarted: () -> Unit) {
                         color = Color.White
                     )
                     Text(
-                        "Create a profile to link your YouTube channel and start posting Shorts automatically.",
+                        "Create a profile first. You cannot link storage, create videos, or upload until a profile exists.",
                         fontSize = 12.sp,
                         color = Color.White.copy(alpha = 0.8f),
                         lineHeight = 17.sp
@@ -1468,17 +1766,53 @@ private fun FirstLaunchBanner(onGetStarted: () -> Unit) {
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                             modifier = Modifier.height(32.dp)
                         ) {
-                            Text("Get Started", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                        }
-                        TextButton(
-                            onClick = { dismissed = true },
-                            contentPadding = PaddingValues(horizontal = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text("Dismiss", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+                            Text("Create Profile", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileRequiredState(onCreateProfile: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                Icons.Rounded.ManageAccounts,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(82.dp)
+            )
+            Spacer(Modifier.height(22.dp))
+            Text(
+                "Create a profile first",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "A profile stores your media folder, video settings, schedule, and upload accounts. Storage linking and video creation stay locked until you create one.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+            Spacer(Modifier.height(28.dp))
+            Button(
+                onClick = onCreateProfile,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
+                Icon(Icons.Rounded.ManageAccounts, contentDescription = null)
+                Spacer(Modifier.width(10.dp))
+                Text("Create Profile", fontWeight = FontWeight.ExtraBold, color = Color.White)
             }
         }
     }

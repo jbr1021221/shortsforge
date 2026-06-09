@@ -30,7 +30,8 @@ object AutoUploadScheduler {
      */
     fun scheduleHourly(
         context: Context,
-        startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        startHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
+        policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
     ) {
         val now = Calendar.getInstance()
         val target = Calendar.getInstance().apply {
@@ -59,7 +60,7 @@ object AutoUploadScheduler {
 
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             TAG_AUTO_UPLOAD,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            policy,
             request
         )
     }
@@ -70,7 +71,10 @@ object AutoUploadScheduler {
      * Bug-fix: was using DAY_OF_YEAR+1 for midnight overflow; now uses HOUR_OF_DAY+2.
      * Bug-fix: removed NetworkType.CONNECTED constraint — let the worker handle retry.
      */
-    fun scheduleBiHourly(context: Context) {
+    fun scheduleBiHourly(
+        context: Context,
+        policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
+    ) {
         val now = Calendar.getInstance()
         val currentHour = now.get(Calendar.HOUR_OF_DAY)
         val nextEvenHour = if (currentHour % 2 == 0) currentHour + 2 else currentHour + (2 - currentHour % 2)
@@ -98,12 +102,15 @@ object AutoUploadScheduler {
 
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             TAG_AUTO_UPLOAD,
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            policy,
             request
         )
     }
 
-    fun scheduleSixHourly(context: Context) {
+    fun scheduleSixHourly(
+        context: Context,
+        policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
+    ) {
         val now = Calendar.getInstance()
         val currentHour = now.get(Calendar.HOUR_OF_DAY)
         val nextSixHour = ((currentHour / 6) + 1) * 6  // next 0, 6, 12, or 18
@@ -124,7 +131,7 @@ object AutoUploadScheduler {
 
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             TAG_AUTO_UPLOAD,
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            policy,
             request
         )
     }

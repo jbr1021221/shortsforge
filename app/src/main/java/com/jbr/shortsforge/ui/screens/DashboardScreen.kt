@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -28,10 +29,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
 import com.jbr.shortsforge.ui.dashboard.DashboardViewModel
 import com.jbr.shortsforge.ui.dashboard.UploadRecord
+import com.jbr.shortsforge.ui.dashboard.UploadTaskDebugItem
 import androidx.compose.foundation.clickable
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 // (Removed local hardcoded design tokens)
 
@@ -52,7 +59,8 @@ private fun Modifier.glassCard() = this
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel(),
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToAllPhotos: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -157,15 +165,33 @@ fun DashboardScreen(
                         value = "🔥 ${state.streak} days",
                         valueColor = Color(0xFFFFB340)
                     )
-                    InfoCard(
+                    CountdownUploadCard(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Schedule,
-                        iconColor = if (state.isAutoUploadEnabled) Color(0xFF34C759) else MaterialTheme.colorScheme.outline,
-                        label = "Next Upload",
-                        value = state.nextScheduledTime,
-                        valueColor = if (state.isAutoUploadEnabled) Color(0xFF34C759) else MaterialTheme.colorScheme.outline
+                        epochMs = state.nextUploadEpochMs,
+                        periodMs = state.nextUploadPeriodMs,
+                        isEnabled = state.isAutoUploadEnabled
                     )
                 }
+            }
+
+            // ── My Photos preview ──────────────────────────────────────────
+            item {
+                MyPhotosSection(
+                    images = state.previewImages,
+                    onSeeAll = onNavigateToAllPhotos
+                )
+            }
+
+            // ── Extra stats grid ───────────────────────────────────────────
+            item {
+                ExtraStatsGrid(state = state)
+            }
+
+            item {
+                UploadQueueSection(
+                    activeTasks = state.activeUploadTasks,
+                    recentTasks = state.recentUploadTasks
+                )
             }
 
             // ── Hourly views performance chart ─────────────────────────────
@@ -289,6 +315,94 @@ private fun StatCard(
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
+
+// ── Countdown upload card ─────────────────────────────────────────────────────
+
+@Composable
+private fun CountdownUploadCard(
+    modifier: Modifier = Modifier,
+    epochMs: Long,
+    periodMs: Long,
+    isEnabled: Boolean
+) {
+    var hours   by remember { mutableStateOf("--") }
+    var minutes by remember { mutableStateOf("--") }
+    var seconds by remember { mutableStateOf("--") }
+
+    LaunchedEffect(epochMs, isEnabled) {
+        if (!isEnabled || epochMs == 0L) {
+            hours = "--"; minutes = "--"; seconds = "--"
+            return@LaunchedEffect
+        }
+        while (true) {
+            val remaining = (epochMs - System.currentTimeMillis()).coerceAtLeast(0)
+            val h = remaining / 3_600_000
+            val m = (remaining % 3_600_000) / 60_000
+            val s = (remaining % 60_000) / 1_000
+            hours   = "%02d".format(h)
+            minutes = "%02d".format(m)
+            seconds = "%02d".format(s)
+            delay(1_000)
+        }
+    }
+
+    val accentColor = if (isEnabled) Color(0xFF34C759) else MaterialTheme.colorScheme.outline
+
+    Column(
+        modifier = modifier
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
+            .padding(vertical = 14.dp, horizontal = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            Icons.Default.Schedule,
+            contentDescription = null,
+            tint = accentColor,
+            modifier = Modifier.size(18.dp)
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            DigitBlock(value = hours,   color = accentColor)
+            Text(":", color = accentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 2.dp))
+            DigitBlock(value = minutes, color = accentColor)
+            Text(":", color = accentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 2.dp))
+            DigitBlock(value = seconds, color = accentColor)
+        }
+        Text(
+            "Next Upload",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun DigitBlock(value: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.12f))
+            .padding(horizontal = 5.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = value,
+            color = color,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
         )
     }
 }
@@ -495,6 +609,105 @@ private fun SectionTitle(text: String) {
     )
 }
 
+@Composable
+private fun UploadQueueSection(
+    activeTasks: List<UploadTaskDebugItem>,
+    recentTasks: List<UploadTaskDebugItem>
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Upload Queue",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                "${activeTasks.size} active",
+                color = if (activeTasks.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFFFB340),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        val rows = if (activeTasks.isNotEmpty()) activeTasks else recentTasks
+        if (rows.isEmpty()) {
+            Text(
+                "No queued tasks",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp
+            )
+        } else {
+            rows.forEach { task ->
+                UploadTaskDebugRow(task)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UploadTaskDebugRow(task: UploadTaskDebugItem) {
+    val statusColor = when (task.status) {
+        "SUCCESS", "CLEANED" -> Color(0xFF34C759)
+        "FAILED" -> Color(0xFFFF453A)
+        "RETRYING" -> Color(0xFFFFB340)
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.45f))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                task.status,
+                color = statusColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "retry ${task.retryCount}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp
+            )
+        }
+        Text(
+            "${task.stage} • ${task.sourceMode} • profile ${task.profileId}",
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+        Text(
+            task.errorMessage ?: task.outputFilePath ?: task.id,
+            color = if (task.errorMessage == null) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFFF453A),
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
+
 // ── Hourly views chart ────────────────────────────────────────────────────────
 
 @Composable
@@ -681,4 +894,182 @@ fun HourlyViewsChart(
 private fun formatViews(views: Long): String = when {
     views >= 1000 -> "${views / 1000}k"
     else -> views.toString()
+}
+
+// ── My Photos section ─────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+private fun MyPhotosSection(
+    images: List<com.jbr.shortsforge.data.model.ImageItem>,
+    onSeeAll: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CardShape)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Header row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(ChipShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.Photo, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                Text("My Photos", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+            Row(
+                modifier = Modifier
+                    .clip(ChipShape)
+                    .clickable(onClick = onSeeAll)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (images.isNotEmpty()) {
+                    Text(
+                        "${images.size} photos",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text("·", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                }
+                Text(
+                    "SEE ALL",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        if (images.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(80.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No photos — pick a folder on the Home screen",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center)
+            }
+        } else {
+            // 2 rows × 3 columns (up to 6 images)
+            val preview = images.take(6).chunked(3)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                preview.forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        row.forEach { img ->
+                            GlideImage(
+                                model = img.uri,
+                                contentDescription = img.fileName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                            )
+                        }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Extra stats grid ──────────────────────────────────────────────────────────
+
+@Composable
+private fun ExtraStatsGrid(state: com.jbr.shortsforge.ui.dashboard.DashboardUiState) {
+    val bestHourLabel = state.bestUploadHour?.let { "${it}:00" } ?: "N/A"
+
+    val cards = listOf(
+        Triple(Icons.Default.LocalFireDepartment, "Upload Streak", "${state.streak} days")           to Color(0xFFFFB340),
+        Triple(Icons.Default.DateRange,           "This Week",     "${state.uploadsThisWeek} uploads") to Color(0xFF34C759),
+        Triple(Icons.Default.CalendarMonth,       "This Month",    "${state.uploadsThisMonth} uploads") to Color(0xFF64B5F6),
+        Triple(Icons.Default.Schedule,            "Best Hour",     bestHourLabel)                    to Color(0xFFFF6B6B)
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle("Stats Overview")
+        cards.chunked(2).forEach { pair ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pair.forEach { (triple, color) ->
+                    val (icon, label, value) = triple
+                    MiniStatCard(
+                        modifier = Modifier.weight(1f),
+                        icon = icon,
+                        iconColor = color,
+                        label = label,
+                        value = value
+                    )
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniStatCard(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    iconColor: Color,
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(iconColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp))
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+            Text(
+                value,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Text(
+                label,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
+    }
 }

@@ -68,22 +68,23 @@ object ProfileScheduler {
         profileId: Long,
         policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
     ) {
-        val initialDelayMs: Long
-        if (policy == ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE) {
-            initialDelayMs = 60_000L
-            Log.d(TAG, "Profile $profileId six-hourly (user-set): first run in 1 min, then every 6h")
-        } else {
-            val now = Calendar.getInstance()
-            val currentHour = now.get(Calendar.HOUR_OF_DAY)
-            val nextSixHour = ((currentHour / 6) + 1) * 6  // next 0, 6, 12, or 18
-            val target = Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, nextSixHour % 24)
-                set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            }
-            if (target.timeInMillis <= now.timeInMillis) target.add(Calendar.HOUR_OF_DAY, 6)
-            initialDelayMs = (target.timeInMillis - System.currentTimeMillis()).coerceAtLeast(0L)
-            Log.d(TAG, "Profile $profileId six-hourly (boot): next at ${nextSixHour % 24}:00 (~${initialDelayMs / 60000} min)")
+        val now = Calendar.getInstance()
+        val currentHour = now.get(Calendar.HOUR_OF_DAY)
+        val nextSixHour = ((currentHour / 6) + 1) * 6
+        val target = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, nextSixHour % 24)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }
+        if (target.timeInMillis <= now.timeInMillis) target.add(Calendar.HOUR_OF_DAY, 6)
+        val initialDelayMs = (target.timeInMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+
+        Log.d(
+            TAG,
+            "Profile $profileId six-hourly: next at ${"%02d:00".format(nextSixHour % 24)} " +
+                    "(~${initialDelayMs / 60000} min), then every 6h"
+        )
 
         val request = PeriodicWorkRequestBuilder<ProfileWorker>(6, TimeUnit.HOURS)
             .setInitialDelay(initialDelayMs, TimeUnit.MILLISECONDS)
@@ -122,11 +123,21 @@ object ProfileScheduler {
 
     fun runTestNow(context: Context, profileId: Long) {
         val request = OneTimeWorkRequestBuilder<ProfileWorker>()
-            .setInputData(workDataOf(ProfileWorker.KEY_PROFILE_ID to profileId))
+            .setInputData(
+                workDataOf(
+                    ProfileWorker.KEY_PROFILE_ID to profileId,
+                    ProfileWorker.KEY_TASK_ID to UUID.randomUUID().toString(),
+                    ProfileWorker.KEY_BYPASS_RUN_GUARD to true
+                )
+            )
             .addTag("test_profile_$profileId")
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "manual_profile_upload_$profileId",
+            ExistingWorkPolicy.KEEP,
+            request
+        )
         Log.d(TAG, "Test run triggered for profile $profileId")
     }
 

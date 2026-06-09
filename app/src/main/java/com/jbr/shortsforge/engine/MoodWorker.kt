@@ -86,6 +86,11 @@ class MoodWorker @AssistedInject constructor(
                 return Result.failure()
             }
 
+            if (!UploadRunGuard.tryStart(applicationContext, "mood:${profile.id}:${targetMood?.name ?: "auto"}")) {
+                notify("Mood Upload Skipped", "Another upload started less than 30 minutes ago.")
+                return Result.success()
+            }
+
             if (profile.ytAccountEmail.isBlank()) {
                 notify("❌ Mood Upload Failed", "No YouTube account linked for ${profile.name}")
                 return Result.failure()
@@ -116,26 +121,37 @@ class MoodWorker @AssistedInject constructor(
                 )
             }
 
-            if (content.error != null || content.slides.isEmpty()) {
-                notify("❌ Mood Upload Failed", content.error ?: "No slides generated")
+            if (content.error != null || (content.slides.isEmpty() && content.videoClips.isEmpty())) {
+                notify("❌ Mood Upload Failed", content.error ?: "No mood content generated")
                 return Result.failure()
             }
 
             Log.d(TAG, "Mood: ${content.mood.label} | quote: \"${content.quoteUsed}\" | " +
-                       "slides: ${content.slides.size}")
+                       "slides: ${content.slides.size} | clips: ${content.videoClips.size}")
 
             // ── Export ───────────────────────────────────────────────────────────
             try { setForeground(makeNotification("Exporting ${content.mood.emoji} ${content.mood.label} video...")) }
             catch (e: Exception) { Log.w(TAG, "Export context error: ", e) }
 
-            val exportedFile = videoExporter.exportVideoSuspend(
-                slides       = content.slides,
-                musicSettings = content.musicSettings,
-                onProgress   = { progress ->
-                    try { setForegroundAsync(makeNotification("Exporting ${content.mood.emoji} ${content.mood.label}: ${progress}%")) }
-                    catch (e: Exception) {}
-                }
-            ) ?: run {
+            val exportedFile = if (content.videoClips.isNotEmpty()) {
+                videoExporter.exportVideoClipsSuspend(
+                    clips = content.videoClips,
+                    musicSettings = content.musicSettings,
+                    onProgress = { progress ->
+                        try { setForegroundAsync(makeNotification("Exporting ${content.mood.emoji} ${content.mood.label}: ${progress}%")) }
+                        catch (e: Exception) {}
+                    }
+                )
+            } else {
+                videoExporter.exportVideoSuspend(
+                    slides       = content.slides,
+                    musicSettings = content.musicSettings,
+                    onProgress   = { progress ->
+                        try { setForegroundAsync(makeNotification("Exporting ${content.mood.emoji} ${content.mood.label}: ${progress}%")) }
+                        catch (e: Exception) {}
+                    }
+                )
+            } ?: run {
                 notify("❌ Mood Upload Failed", "Export failed for ${content.mood.label}")
                 return Result.failure()
             }

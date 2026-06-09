@@ -14,7 +14,13 @@ data class SlideItem(
     val textColor: Int = 0xFFFFFFFF.toInt(),
     val textPosition: String = "Center",
     val kenBurnsConfig: KenBurnsConfig = KenBurnsConfig.default(),
-    val isTextEnabled: Boolean = true
+    val isTextEnabled: Boolean = true,
+    val avgBrightness: Float = 128f,
+    val transitionDurationMs: Int = 700,
+    val disableAudioFlash: Boolean = false,
+    val slideStartMs: Long = 0L,
+    val beatTimestamps: List<Long> = emptyList(),
+    val zoomPunchStrength: Float = 0.6f
 ) : Parcelable
 
 @Parcelize
@@ -24,6 +30,25 @@ data class AudioItem(
     val fileName: String,
     val durationMs: Long
 ) : Parcelable
+
+@Parcelize
+data class VideoItem(
+    val id: String,
+    val uri: String,
+    val fileName: String,
+    val durationMs: Long,
+    val dateModified: Long
+) : Parcelable
+
+@Parcelize
+data class VideoClipItem(
+    val sourceUri: String,
+    val fileName: String,
+    val startMs: Long,
+    val endMs: Long
+) : Parcelable {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
+}
 
 @Parcelize
 data class MusicSettings(

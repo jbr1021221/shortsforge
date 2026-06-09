@@ -82,4 +82,48 @@ class KenBurnsEngine @Inject constructor() {
             endCenterY = eCY
         )
     }
+
+    fun velocityProgress(
+        rawProgress: Float,
+        slideDurationMs: Long,
+        slideStartMs: Long,
+        beatTimestamps: List<Long>
+    ): Float {
+        val safeDuration = slideDurationMs.coerceAtLeast(1L)
+        val slideEndMs = slideStartMs + safeDuration
+        val localBeats = beatTimestamps
+            .filter { it in slideStartMs..slideEndMs }
+            .map { (it - slideStartMs).toFloat() / safeDuration }
+
+        if (localBeats.isEmpty()) return rawProgress
+
+        var speedMultiplier = 1.0f
+        for (beatProg in localBeats) {
+            if (beatProg < 0.25f || beatProg > 0.85f) continue
+
+            val slowStart = (beatProg - 0.20f).coerceAtLeast(0f)
+            val slowEnd = beatProg
+            val fastEnd = (beatProg + 0.18f).coerceAtMost(1f)
+
+            speedMultiplier *= when {
+                rawProgress in slowStart..slowEnd && slowEnd > slowStart -> {
+                    val t = (rawProgress - slowStart) / (slowEnd - slowStart)
+                    lerp(1.0f, 0.10f, easeIn(t))
+                }
+                rawProgress in slowEnd..fastEnd && fastEnd > slowEnd -> {
+                    val t = (rawProgress - slowEnd) / (fastEnd - slowEnd)
+                    lerp(0.15f, 2.2f, easeOut(t))
+                }
+                else -> 1.0f
+            }
+        }
+
+        return (rawProgress * speedMultiplier).coerceIn(0f, 1f)
+    }
+
+    private fun easeIn(t: Float) = t * t
+
+    private fun easeOut(t: Float) = 1f - (1f - t) * (1f - t)
+
+    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 }
